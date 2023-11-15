@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:siberian_di/src/exceptions.dart';
 
-typedef DisposeInstanceCallback<T> = Future<void> Function(T);
+typedef DisposeCallback<T> = void Function(T);
 
 const _kRootScope = 'RootScope';
 
@@ -78,18 +78,27 @@ class DiScope {
     throw InstanceNotFoundException(T, this);
   }
 
-  T put<T>(T instance, {String? tag, bool replace = false, bool retain = true, DisposeInstanceCallback<T>? onDispose}) {
+  T replace<T>(T instance, {String? tag, DisposeCallback<T>? onDispose}) {
     _assertOpen();
     Iterable<DiElement<T>> elements = _elementsOf<T>(tag);
-    if (!replace && elements.isNotEmpty) {
-      if (retain) {
-        return elements.first.instance;
-      }
 
+    if (elements.isNotEmpty) {
+      evict<T>(tag: tag);
+    }
+
+    return put<T>(instance, tag: tag, onDispose: onDispose);
+  }
+
+  T put<T>(T instance, {String? tag, DisposeCallback<T>? onDispose}) {
+    _assertOpen();
+    Iterable<DiElement<T>> elements = _elementsOf<T>(tag);
+
+    if (elements.isNotEmpty) {
       throw DuplicateInstanceException(T, this);
     }
 
     var items = _instances.putIfAbsent(T, () => []);
+    items.removeWhere((it) => it.instance.runtimeType == instance.runtimeType && it.tag == tag);
     items.add(DiElement<T>(instance: instance, tag: tag, onDispose: onDispose));
     return instance;
   }
@@ -100,17 +109,19 @@ class DiScope {
     _subScopes.clear();
   }
 
-  Future<void> close() async {
+  void close() {
     if (!_isClosed) {
       _parent?._subScopes.remove(this);
-      var instances = _instances.values.expand((element) => element);
-      for (var i in instances) {
-        await i.onDispose?.call(i);
+      for (var list in _instances.values) {
+        for (var item in list) {
+          item.dispose();
+        }
       }
+
       _instances.clear();
 
       for (var s in _subScopes) {
-        await s.close();
+        s.close();
       }
       _isClosed = true;
     }
@@ -124,6 +135,7 @@ class DiScope {
     var items = (_instances[T] ?? <DiElement<T>>[]).cast<DiElement<T>>();
     assert(items.length == 1);
     var item = items.removeAt(0);
+    item.onDispose?.call(item.instance);
     return item.instance;
   }
 
@@ -174,13 +186,15 @@ class DiScope {
 class DiElement<T> {
   final T instance;
   final String? tag;
-  final DisposeInstanceCallback<T>? onDispose;
+  final DisposeCallback<T>? onDispose;
 
   const DiElement({
     required this.instance,
     this.tag,
     this.onDispose,
   });
+
+  void dispose() => onDispose?.call(instance);
 
   @override
   String toString() {

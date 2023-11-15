@@ -7,13 +7,13 @@ void main() {
     var item = TestClass('somedata');
     root.put<TestClass>(
       item,
-      onDispose: (item) async {
-        item.disposed = false;
+      onDispose: (item) {
+        item.disposed = true;
       },
     );
 
     // var evicted = root.evict<TestClass>();
-    await root.close();
+    root.close();
     assert(item.disposed);
   });
 }
