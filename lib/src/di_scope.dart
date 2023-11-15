@@ -3,10 +3,10 @@ import 'package:siberian_di/src/exceptions.dart';
 
 typedef DisposeInstanceCallback<T> = Future<void> Function(T);
 
-const _kAppScope = 'AppScope';
+const _kRootScope = 'RootScope';
 
 // ignore: non_constant_identifier_names
-final AppScope = DiScope._app();
+final RootScope = DiScope._app();
 
 class DiScope {
   final String name;
@@ -16,13 +16,13 @@ class DiScope {
   bool _isClosed = false;
 
   DiScope._app()
-      : name = _kAppScope,
+      : name = _kRootScope,
         _parent = null;
 
   DiScope.open(
     this.name, {
     DiScope? parent,
-  }) : _parent = parent ?? AppScope {
+  }) : _parent = parent ?? RootScope {
     _parent?._subScopes.add(this);
   }
 
