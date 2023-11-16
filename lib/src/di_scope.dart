@@ -6,45 +6,66 @@ typedef DisposeCallback<T> = void Function(T);
 const _kRootScope = 'RootScope';
 
 // ignore: non_constant_identifier_names
-final RootScope = DiScope._app();
+final RootScope = DiScope._root();
 
 class DiScope {
   final String name;
-  final DiScope? _parent;
-  final Map<Type, List<DiElement>> _instances = {};
+  late final DiScope? _parent;
+  final Map<Type, Map<String, DiElement>> _instances = {};
   final List<DiScope> _subScopes = [];
   bool _isClosed = false;
 
-  DiScope._app()
+  DiScope._root()
       : name = _kRootScope,
         _parent = null;
 
   DiScope.open(
     this.name, {
     DiScope? parent,
-  }) : _parent = parent ?? RootScope {
-    _parent?._subScopes.add(this);
+    String? parentName,
+  }) {
+    _parent = parent ?? RootScope._locateScope(parentName) ?? RootScope;
   }
 
-  Iterable<DiElement<T>> _elementsOf<T>(String? tag) {
-    final elements = (_instances[T] ?? <DiElement<T>>[]).cast<DiElement<T>>();
-    return elements.where((it) => it.tag == tag);
+  static void closeScope(String name) {
+    if (name == _kRootScope) {
+      throw ArgumentError('cannot close root scope');
+    }
+
+    var scope = RootScope._locateScope(name);
+    if (scope == null) {
+      throw ScopeNotFoundException(name);
+    }
+
+    scope.close();
   }
 
-  Iterable<DiElement> _elementsOfType(Type type, String? tag) {
-    final elements = (_instances[type] ?? <DiElement>[]).cast<DiElement>();
-    return elements.where((it) => it.tag == tag);
+  DiScope? _locateScope(final String? name) {
+    if (name == null || name.isEmpty) {
+      return null;
+    }
+
+    if (this.name == name) {
+      return this;
+    }
+
+    for (var sub in _subScopes) {
+      var subResult = sub._locateScope(name);
+      if (subResult != null) {
+        return subResult;
+      }
+    }
+
+    return null;
   }
 
-  bool contains<T>({String? tag}) {
-    var elements = _elementsOf<T>(tag);
-    return elements.isNotEmpty;
-  }
+  DiElement<T>? _elementOf<T>(String? tag) => _instances[T]?[tag ?? ''] as DiElement<T>?;
 
-  bool containsType(Type type, {String? tag}) {
-    var elements = _elementsOfType(type, tag);
-    return elements.isNotEmpty;
-  }
+  DiElement? _elementOfType(Type type, String? tag) => _instances[type]?[tag ?? ''];
+
+  bool contains<T>({String? tag}) => _elementOf<T>(tag) != null;
+
+  bool containsType(Type type, {String? tag}) => _elementOfType(type, tag) != null;
 
   bool isRegistered<T>({String? tag}) {
     if (contains<T>(tag: tag)) {
@@ -64,25 +85,23 @@ class DiScope {
 
   T find<T>({String? tag}) {
     _assertOpen();
-    final elements = _elementsOf<T>(tag);
-    assert(elements.length <= 1);
-    if (elements.isNotEmpty) {
-      return elements.first.instance as T;
-    }
 
-    T? element = _parent?.find<T>(tag: tag);
+    final DiElement<T>? element = _elementOf<T>(tag);
     if (element != null) {
-      return element;
+      return element.instance;
     }
 
-    throw InstanceNotFoundException(T, this);
+    final parent = _parent?.find<T>(tag: tag);
+    if (parent == null) {
+      throw InstanceNotFoundException(T, this);
+    }
+
+    return parent;
   }
 
   T replace<T>(T instance, {String? tag, DisposeCallback<T>? onDispose}) {
     _assertOpen();
-    Iterable<DiElement<T>> elements = _elementsOf<T>(tag);
-
-    if (elements.isNotEmpty) {
+    if (contains<T>()) {
       evict<T>(tag: tag);
     }
 
@@ -91,15 +110,13 @@ class DiScope {
 
   T put<T>(T instance, {String? tag, DisposeCallback<T>? onDispose}) {
     _assertOpen();
-    Iterable<DiElement<T>> elements = _elementsOf<T>(tag);
-
-    if (elements.isNotEmpty) {
+    var item = _elementOf<T>(tag);
+    if (item != null) {
       throw DuplicateInstanceException(T, this);
     }
 
-    var items = _instances.putIfAbsent(T, () => []);
-    items.removeWhere((it) => it.instance.runtimeType == instance.runtimeType && it.tag == tag);
-    items.add(DiElement<T>(instance: instance, tag: tag, onDispose: onDispose));
+    var map = _instances.putIfAbsent(T, () => <String, DiElement<T>>{});
+    map[tag ?? ''] = DiElement<T>(instance: instance, tag: tag, onDispose: onDispose);
     return instance;
   }
 
@@ -111,19 +128,19 @@ class DiScope {
 
   void close() {
     if (!_isClosed) {
+      _isClosed = true;
       _parent?._subScopes.remove(this);
-      for (var list in _instances.values) {
-        for (var item in list) {
-          item.dispose();
-        }
-      }
-
-      _instances.clear();
 
       for (var s in _subScopes) {
         s.close();
       }
-      _isClosed = true;
+
+      var items = _instances.values.expand((element) => element.values);
+      for (var item in items) {
+        item.dispose();
+      }
+
+      _instances.clear();
     }
   }
 
@@ -132,9 +149,12 @@ class DiScope {
       throw InstanceNotFoundException(T, this);
     }
 
-    var items = (_instances[T] ?? <DiElement<T>>[]).cast<DiElement<T>>();
-    assert(items.length == 1);
-    var item = items.removeAt(0);
+    final item = _instances[T]?[tag ?? ''];
+    if (item == null) {
+      throw InstanceNotFoundException(T, this);
+    }
+
+    _instances[T]?.remove(tag ?? '');
     item.onDispose?.call(item.instance);
     return item.instance;
   }
@@ -165,7 +185,7 @@ class DiScope {
   // ignore: avoid_print
   void verboseTree({bool verboseInstaces = true, String? offset}) {
     var tabs = offset ?? '';
-    var items = _instances.values.expand((element) => element);
+    var items = _instances.values.expand((element) => element.values);
     print("$tabs$name");
     if (verboseInstaces) {
       tabs += '\t';

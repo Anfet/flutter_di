@@ -18,6 +18,12 @@ class InstanceNotFoundException extends DependencyException {
   InstanceNotFoundException(this.type, this.scope) : super("'$type' not found in '${scope.name}' scope");
 }
 
+class ScopeNotFoundException extends DependencyException {
+  final String name;
+
+  ScopeNotFoundException(this.name) : super("scope '$name' not found");
+}
+
 class DuplicateInstanceException extends DependencyException {
   final Type type;
   final DiScope scope;
