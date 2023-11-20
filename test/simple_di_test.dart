@@ -74,4 +74,23 @@ void main() {
     assert(i == 2);
     root.verboseTree();
   });
+
+  test('evict', () {
+    int a = 1;
+    RootScope.replace<int>(a);
+    int b = 2;
+    RootScope.replace<int>(b);
+    assert(RootScope.find<int>() == b);
+  });
+
+  test('evict with dispose', () {
+    int a = 1;
+    RootScope.replace<int>(
+      a,
+      onDispose: (p0) {},
+    );
+    int b = 2;
+    RootScope.replace<int>(b, onDispose: (p0) => null);
+    assert(RootScope.find<int>() == b);
+  });
 }

@@ -149,12 +149,11 @@ class DiScope {
       throw InstanceNotFoundException(T, this);
     }
 
-    final item = _instances[T]?[tag ?? ''];
+    final item = _instances[T]?.remove(tag ?? '') as DiElement<T>?;
     if (item == null) {
       throw InstanceNotFoundException(T, this);
     }
 
-    _instances[T]?.remove(tag ?? '');
     item.onDispose?.call(item.instance);
     return item.instance;
   }
