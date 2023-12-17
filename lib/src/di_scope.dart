@@ -21,10 +21,10 @@ class DiScope {
 
   DiScope.open(
     this.name, {
-    DiScope? parent,
-    String? parentName,
+    DiScope? knownParentScope,
+    String? lookupParentScope,
   }) {
-    _parent = parent ?? RootScope._locateScope(parentName) ?? RootScope;
+    _parent = knownParentScope ?? RootScope.locateScope(lookupParentScope) ?? RootScope;
   }
 
   static void closeScope(String name) {
@@ -32,7 +32,7 @@ class DiScope {
       throw ArgumentError('cannot close root scope');
     }
 
-    var scope = RootScope._locateScope(name);
+    var scope = RootScope.locateScope(name);
     if (scope == null) {
       throw ScopeNotFoundException(name);
     }
@@ -40,7 +40,7 @@ class DiScope {
     scope.close();
   }
 
-  DiScope? _locateScope(final String? name) {
+  DiScope? locateScope(final String? name) {
     if (name == null || name.isEmpty) {
       return null;
     }
@@ -50,7 +50,7 @@ class DiScope {
     }
 
     for (var sub in _subScopes) {
-      var subResult = sub._locateScope(name);
+      var subResult = sub.locateScope(name);
       if (subResult != null) {
         return subResult;
       }
