@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:siberian_di/siberian_di.dart';
 
 mixin ScopedWidgetState<T extends StatefulWidget> on State<T> {
-  DiScope get scope;
+  abstract DiScope scope;
 
   @override
   void initState() {
