@@ -52,7 +52,7 @@ void main() {
 
   test('multiscope, a+b', () {
     var root = DiScope.open('root');
-    var child = DiScope.open('child', parent: root);
+    var child = DiScope.open('child', knownParentScope: root);
     root.put<int>(1);
     child.put<double>(2.0);
     assert(child.contains<double>());
@@ -66,7 +66,7 @@ void main() {
 
   test('multiscope, substitute', () {
     var root = DiScope.open('root');
-    var child = DiScope.open('child', parent: root);
+    var child = DiScope.open('child', knownParentScope: root);
     root.put<int>(1);
     child.put<int>(2);
     assert(child.contains<int>());
