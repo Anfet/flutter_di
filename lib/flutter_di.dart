@@ -1,4 +1,4 @@
-library siberian_di;
+library flutter_di;
 
 export 'src/di_scope.dart';
 export 'src/exceptions.dart';

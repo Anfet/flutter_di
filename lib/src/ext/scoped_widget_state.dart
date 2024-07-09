@@ -1,8 +1,8 @@
 import 'package:flutter/widgets.dart';
-import 'package:siberian_di/siberian_di.dart';
+import 'package:flutter_di/flutter_di.dart';
 
 mixin ScopedWidgetState<T extends StatefulWidget> on State<T> {
-  abstract DiScope scope;
+  late final DiScope scope = DiScope.open('${this.runtimeType}Scope');
 
   @override
   void initState() {

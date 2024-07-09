@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-import 'package:siberian_di/src/exceptions.dart';
+import 'package:flutter_di/src/exceptions.dart';
 
 typedef DisposeCallback<T> = void Function(T);
 

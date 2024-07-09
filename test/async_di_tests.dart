@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:siberian_di/siberian_di.dart';
+import 'package:flutter_di/flutter_di.dart';
 
 void main() {
   test('a', () async {
