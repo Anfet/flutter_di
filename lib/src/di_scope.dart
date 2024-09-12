@@ -108,6 +108,26 @@ class DiScope {
     return put<T>(instance, tag: tag, onDispose: onDispose);
   }
 
+  void replaceLazy<T>(ValueGetter<T> instancer, {String? tag, DisposeCallback<T>? onDispose}) {
+    _assertOpen();
+    if (contains<T>()) {
+      evict<T>(tag: tag);
+    }
+
+    return putLazy<T>(instancer, tag: tag, onDispose: onDispose);
+  }
+
+  void putLazy<T>(ValueGetter<T> instancer, {String? tag, DisposeCallback<T>? onDispose}) {
+    _assertOpen();
+    var item = _elementOf<T>(tag);
+    if (item != null) {
+      throw DuplicateInstanceException(T, this);
+    }
+
+    var map = _instances.putIfAbsent(T, () => <String, DiElement<T>>{});
+    map[tag ?? ''] = DiElement<T>.lazy(instancer: instancer, tag: tag, onDispose: onDispose);
+  }
+
   T put<T>(T instance, {String? tag, DisposeCallback<T>? onDispose}) {
     _assertOpen();
     var item = _elementOf<T>(tag);
@@ -116,7 +136,7 @@ class DiScope {
     }
 
     var map = _instances.putIfAbsent(T, () => <String, DiElement<T>>{});
-    map[tag ?? ''] = DiElement<T>(instance: instance, tag: tag, onDispose: onDispose);
+    map[tag ?? ''] = DiElement<T>.direct(item: instance, tag: tag, onDispose: onDispose);
     return instance;
   }
 
@@ -201,19 +221,35 @@ class DiScope {
   }
 }
 
-@immutable
 class DiElement<T> {
-  final T instance;
+  T? _instance;
+  final ValueGetter<T>? instancer;
   final String? tag;
   final DisposeCallback<T>? onDispose;
 
-  const DiElement({
-    required this.instance,
+  T get instance {
+    _instance ??= instancer?.call();
+    return _instance!;
+  }
+
+  DiElement.direct({
+    required T item,
     this.tag,
     this.onDispose,
-  });
+  })  : _instance = item,
+        instancer = null;
 
-  void dispose() => onDispose?.call(instance);
+  DiElement.lazy({
+    required this.instancer,
+    this.tag,
+    this.onDispose,
+  }) : _instance = null;
+
+  void dispose() {
+    if (_instance != null) {
+      onDispose?.call(_instance!);
+    }
+  }
 
   @override
   String toString() {
