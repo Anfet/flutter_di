@@ -83,6 +83,8 @@ class DiScope {
     return _parent?.containsType(type, tag: tag) ?? false;
   }
 
+  T call<T>({String? tag}) => find<T>(tag: tag);
+
   T find<T>({String? tag}) {
     _assertOpen();
 
