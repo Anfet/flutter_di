@@ -25,6 +25,7 @@ class DiScope {
     String? lookupParentScope,
   }) {
     _parent = knownParentScope ?? RootScope.locateScope(lookupParentScope) ?? RootScope;
+    _parent?._subScopes.add(this);
   }
 
   static void closeScope(String name) {
