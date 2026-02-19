@@ -25,6 +25,11 @@ class DiScope {
     String? lookupParentScope,
   }) {
     _parent = knownParentScope ?? RootScope.locateScope(lookupParentScope) ?? RootScope;
+    final root = _parent?._rootScope() ?? this;
+    if (root.locateScope(name) != null) {
+      throw DuplicateScopeException(name, root);
+    }
+    _parent?._subScopes.add(this);
   }
 
   static void closeScope(String name) {
@@ -72,7 +77,7 @@ class DiScope {
       return true;
     }
 
-    return _parent?.contains<T>(tag: tag) ?? false;
+    return _parent?.isRegistered<T>(tag: tag) ?? false;
   }
 
   bool isRegisteredType(Type type, {String? tag}) {
@@ -80,7 +85,18 @@ class DiScope {
       return true;
     }
 
-    return _parent?.containsType(type, tag: tag) ?? false;
+    return _parent?.isRegisteredType(type, tag: tag) ?? false;
+  }
+
+  T call<T>({String? tag}) => find<T>(tag: tag);
+
+  DiScope _rootScope() {
+    DiScope current = this;
+    while (current._parent != null) {
+      current = current._parent!;
+    }
+
+    return current;
   }
 
   T find<T>({String? tag}) {
@@ -93,30 +109,88 @@ class DiScope {
 
     final parent = _parent?.find<T>(tag: tag);
     if (parent == null) {
-      throw InstanceNotFoundException(T, this);
+      throw InstanceNotFoundException(T, this, tag: tag);
     }
 
     return parent;
   }
 
-  T replace<T>(T instance, {String? tag, DisposeCallback<T>? onDispose}) {
+  T replace<T>(
+    T instance, {
+    String? tag,
+    DisposeCallback<T>? onDispose,
+    bool registerRuntimeType = true,
+  }) {
     _assertOpen();
-    if (contains<T>()) {
+    if (contains<T>(tag: tag)) {
       evict<T>(tag: tag);
     }
 
-    return put<T>(instance, tag: tag, onDispose: onDispose);
+    return put<T>(
+      instance,
+      tag: tag,
+      onDispose: onDispose,
+      registerRuntimeType: registerRuntimeType,
+    );
   }
 
-  T put<T>(T instance, {String? tag, DisposeCallback<T>? onDispose}) {
+  void replaceLazy<T>(ValueGetter<T> instancer, {String? tag, DisposeCallback<T>? onDispose}) {
+    _assertOpen();
+    if (contains<T>(tag: tag)) {
+      evict<T>(tag: tag);
+    }
+
+    return putLazy<T>(instancer, tag: tag, onDispose: onDispose);
+  }
+
+  void putLazy<T>(ValueGetter<T> instancer, {String? tag, DisposeCallback<T>? onDispose}) {
     _assertOpen();
     var item = _elementOf<T>(tag);
     if (item != null) {
-      throw DuplicateInstanceException(T, this);
+      throw DuplicateInstanceException(
+        T,
+        this,
+        instanceType: T,
+        tag: tag,
+      );
     }
 
     var map = _instances.putIfAbsent(T, () => <String, DiElement<T>>{});
-    map[tag ?? ''] = DiElement<T>(instance: instance, tag: tag, onDispose: onDispose);
+    map[tag ?? ''] = DiElement<T>.lazy(instancer: instancer, tag: tag, onDispose: onDispose);
+  }
+
+  T put<T>(
+    T instance, {
+    String? tag,
+    DisposeCallback<T>? onDispose,
+    bool registerRuntimeType = true,
+  }) {
+    _assertOpen();
+    final tagKey = tag ?? '';
+    if (contains<T>(tag: tag)) {
+      throw DuplicateInstanceException(
+        T,
+        this,
+        instanceType: instance.runtimeType,
+        tag: tag,
+      );
+    }
+
+    final runtimeType = instance.runtimeType;
+    if (registerRuntimeType && runtimeType != T && containsType(runtimeType, tag: tag)) {
+      throw DuplicateInstanceException(
+        runtimeType,
+        this,
+        instanceType: runtimeType,
+        tag: tag,
+      );
+    }
+
+    final item = DiElement<T>.direct(item: instance, tag: tag, onDispose: onDispose);
+    _instances.putIfAbsent(T, () => <String, DiElement>{})[tagKey] = item;
+    if (registerRuntimeType && runtimeType != T) {
+      _instances.putIfAbsent(runtimeType, () => <String, DiElement>{})[tagKey] = item;
+    }
     return instance;
   }
 
@@ -131,27 +205,38 @@ class DiScope {
       _isClosed = true;
       _parent?._subScopes.remove(this);
 
-      for (var s in _subScopes) {
+      for (var s in List<DiScope>.from(_subScopes)) {
         s.close();
       }
 
-      var items = _instances.values.expand((element) => element.values);
+      final items = Set<DiElement>.identity()
+        ..addAll(_instances.values.expand((element) => element.values));
       for (var item in items) {
         item.dispose();
       }
 
       _instances.clear();
+      _subScopes.clear();
     }
   }
 
   T evict<T>({String? tag}) {
-    if (!contains<T>(tag: tag)) {
-      throw InstanceNotFoundException(T, this);
+    _assertOpen();
+    final tagKey = tag ?? '';
+    final item = _instances[T]?[tagKey] as DiElement<T>?;
+    if (item == null) {
+      throw InstanceNotFoundException(T, this, tag: tag);
     }
 
-    final item = _instances[T]?.remove(tag ?? '') as DiElement<T>?;
-    if (item == null) {
-      throw InstanceNotFoundException(T, this);
+    final emptyTypes = <Type>[];
+    for (final entry in _instances.entries) {
+      entry.value.removeWhere((_, value) => identical(value, item));
+      if (entry.value.isEmpty) {
+        emptyTypes.add(entry.key);
+      }
+    }
+    for (final type in emptyTypes) {
+      _instances.remove(type);
     }
 
     item.onDispose?.call(item.instance);
@@ -159,7 +244,9 @@ class DiScope {
   }
 
   void _assertOpen() {
-    assert(!_isClosed, "scope '$name' already closed");
+    if (_isClosed) {
+      throw StateError("scope '$name' already closed");
+    }
   }
 
   @override
@@ -201,19 +288,35 @@ class DiScope {
   }
 }
 
-@immutable
 class DiElement<T> {
-  final T instance;
+  T? _instance;
+  final ValueGetter<T>? instancer;
   final String? tag;
   final DisposeCallback<T>? onDispose;
 
-  const DiElement({
-    required this.instance,
+  T get instance {
+    _instance ??= instancer?.call();
+    return _instance!;
+  }
+
+  DiElement.direct({
+    required T item,
     this.tag,
     this.onDispose,
-  });
+  })  : _instance = item,
+        instancer = null;
 
-  void dispose() => onDispose?.call(instance);
+  DiElement.lazy({
+    required this.instancer,
+    this.tag,
+    this.onDispose,
+  }) : _instance = null;
+
+  void dispose() {
+    if (_instance != null) {
+      onDispose?.call(_instance!);
+    }
+  }
 
   @override
   String toString() {

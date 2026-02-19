@@ -12,10 +12,17 @@ class DependencyException implements Exception {
 }
 
 class InstanceNotFoundException extends DependencyException {
-  final Type type;
+  final Type requestedType;
+  final String? tag;
   final DiScope scope;
 
-  InstanceNotFoundException(this.type, this.scope) : super("'$type' not found in '${scope.name}' scope");
+  InstanceNotFoundException(
+    this.requestedType,
+    this.scope, {
+    this.tag,
+  }) : super(
+          "'$requestedType' with tag '${tag ?? ''}' not found in '${scope.name}' scope",
+        );
 }
 
 class ScopeNotFoundException extends DependencyException {
@@ -24,9 +31,25 @@ class ScopeNotFoundException extends DependencyException {
   ScopeNotFoundException(this.name) : super("scope '$name' not found");
 }
 
-class DuplicateInstanceException extends DependencyException {
-  final Type type;
+class DuplicateScopeException extends DependencyException {
+  final String name;
   final DiScope scope;
 
-  DuplicateInstanceException(this.type, this.scope) : super("$type is already present in '${scope.name}' scope; use replace = true");
+  DuplicateScopeException(this.name, this.scope) : super("scope '$name' is already present in '${scope.name}' scope tree");
+}
+
+class DuplicateInstanceException extends DependencyException {
+  final Type registeredType;
+  final Type instanceType;
+  final String? tag;
+  final DiScope scope;
+
+  DuplicateInstanceException(
+    this.registeredType,
+    this.scope, {
+    required this.instanceType,
+    this.tag,
+  }) : super(
+          "$registeredType (instance: $instanceType, tag: '${tag ?? ''}') is already present in '${scope.name}' scope; use replace = true",
+        );
 }

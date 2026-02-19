@@ -2,9 +2,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_di/flutter_di.dart';
 
 void main() {
+  tearDown(() {
+    RootScope.reset();
+  });
+
   test('a', () async {
-    var root = DiScope.open('root');
-    var item = TestClass('somedata');
+    final root = DiScope.open('root');
+    final item = TestClass('somedata');
     root.put<TestClass>(
       item,
       onDispose: (item) {
@@ -14,7 +18,7 @@ void main() {
 
     // var evicted = root.evict<TestClass>();
     root.close();
-    assert(item.disposed);
+    expect(item.disposed, isTrue);
   });
 }
 

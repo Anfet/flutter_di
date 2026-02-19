@@ -1,6 +1,6 @@
 name: flutter_di
 description: Siberian Dependency Injection
-version: 0.0.2
+version: 0.0.7
 
 environment:
   sdk: '>=3.1.5 <4.0.0'
