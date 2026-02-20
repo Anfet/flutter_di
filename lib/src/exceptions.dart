@@ -1,4 +1,4 @@
-import 'package:flutter_di/src/di_scope.dart';
+import 'package:simple_service_locator/src/di_scope.dart';
 
 class DependencyException implements Exception {
   final String message;
