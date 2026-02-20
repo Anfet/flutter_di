@@ -64,11 +64,14 @@ class DiScope {
     return null;
   }
 
-  DiElement<T>? _elementOf<T>(String? tag) => _instances[T]?[tag ?? ''] as DiElement<T>?;
+  DiElement? _elementOf<T>(String? tag) => _instances[T]?[tag ?? ''];
 
   DiElement? _elementOfType(Type type, String? tag) => _instances[type]?[tag ?? ''];
 
-  bool contains<T>({String? tag}) => _elementOf<T>(tag) != null;
+  bool contains<T>({String? tag}) {
+    final item = _elementOf<T>(tag);
+    return item != null && item.instance is T;
+  }
 
   bool containsType(Type type, {String? tag}) => _elementOfType(type, tag) != null;
 
@@ -88,7 +91,7 @@ class DiScope {
     return _parent?.isRegisteredType(type, tag: tag) ?? false;
   }
 
-  T call<T>({String? tag}) => find<T>(tag: tag);
+  T call<T>({String? tag, bool exactTypeMatch = false}) => find<T>(tag: tag, exactTypeMatch: exactTypeMatch);
 
   DiScope _rootScope() {
     DiScope current = this;
@@ -99,20 +102,49 @@ class DiScope {
     return current;
   }
 
-  T find<T>({String? tag}) {
+  T find<T>({String? tag, bool exactTypeMatch = false}) {
     _assertOpen();
 
-    final DiElement<T>? element = _elementOf<T>(tag);
-    if (element != null) {
-      return element.instance;
+    final element = _elementOf<T>(tag);
+    if (element != null && element.instance is T) {
+      return element.instance as T;
     }
 
-    final parent = _parent?.find<T>(tag: tag);
+    if (!exactTypeMatch) {
+      final localDescendant = _findDescendant<T>(tag);
+      if (localDescendant != null) {
+        return localDescendant;
+      }
+    }
+
+    final parent = _parent?.find<T>(tag: tag, exactTypeMatch: exactTypeMatch);
     if (parent == null) {
       throw InstanceNotFoundException(T, this, tag: tag);
     }
 
     return parent;
+  }
+
+  T? _findDescendant<T>(String? tag) {
+    final tagKey = tag ?? '';
+    final checked = Set<DiElement>.identity();
+    for (final entry in _instances.entries) {
+      final item = entry.value[tagKey];
+      if (item == null || !checked.add(item)) {
+        continue;
+      }
+
+      // Consider only concrete runtime registrations when resolving descendants.
+      if (entry.key != item.instance.runtimeType) {
+        continue;
+      }
+
+      if (item.instance is T) {
+        return item.instance as T;
+      }
+    }
+
+    return null;
   }
 
   T replace<T>(

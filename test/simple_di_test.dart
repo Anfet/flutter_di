@@ -153,6 +153,24 @@ void main() {
     scope.close();
   });
 
+  test('find resolves descendant when exact type is not required', () {
+    final scope = DiScope.open('root');
+    final vm = ViewModelImplementation();
+    scope.put<ViewModelImplementation>(vm, registerRuntimeType: false);
+
+    expect(scope.find<ViewModelAbstraction>(), same(vm));
+    scope.close();
+  });
+
+  test('find with exactTypeMatch does not resolve descendant', () {
+    final scope = DiScope.open('root');
+    final vm = ViewModelImplementation();
+    scope.put<ViewModelImplementation>(vm, registerRuntimeType: false);
+
+    expect(() => scope.find<ViewModelAbstraction>(exactTypeMatch: true), throwsA(isA<InstanceNotFoundException>()));
+    scope.close();
+  });
+
   test('duplicate scope names are rejected', () {
     final root = DiScope.open('root');
     DiScope.open('child', knownParentScope: root);
