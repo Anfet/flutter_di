@@ -1,14 +1,24 @@
 import 'package:flutter/foundation.dart';
 import 'package:simple_service_locator/src/exceptions.dart';
 
+/// Called when an instance is removed from a scope or a scope is closed.
 typedef DisposeCallback<T> = void Function(T);
 
 const _kRootScope = 'RootScope';
 
 // ignore: non_constant_identifier_names
+/// The singleton root scope for the application.
+///
+/// All scopes are attached to this scope directly or indirectly.
 final RootScope = DiScope._root();
 
+/// A named dependency scope that supports hierarchical lookup.
+///
+/// Instances can be registered directly or lazily and resolved by type
+/// (optionally with a [tag]). Child scopes can override registrations from
+/// parent scopes.
 class DiScope {
+  /// A human-readable unique scope name within a root scope tree.
   final String name;
   late final DiScope? _parent;
   final Map<Type, Map<String, DiElement>> _instances = {};
@@ -19,12 +29,23 @@ class DiScope {
       : name = _kRootScope,
         _parent = null;
 
+  /// Opens a new scope and attaches it to a parent scope.
+  ///
+  /// Parent resolution order:
+  /// 1. [knownParentScope] if provided.
+  /// 2. Scope found from root by [lookupParentScope].
+  /// 3. [RootScope] as fallback.
+  ///
+  /// Throws [DuplicateScopeException] if a scope with [name] already exists
+  /// in the same root tree.
   DiScope.open(
     this.name, {
     DiScope? knownParentScope,
     String? lookupParentScope,
   }) {
-    _parent = knownParentScope ?? RootScope.locateScope(lookupParentScope) ?? RootScope;
+    _parent = knownParentScope ??
+        RootScope.locateScope(lookupParentScope) ??
+        RootScope;
     final root = _parent?._rootScope() ?? this;
     if (root.locateScope(name) != null) {
       throw DuplicateScopeException(name, root);
@@ -32,6 +53,11 @@ class DiScope {
     _parent?._subScopes.add(this);
   }
 
+  /// Closes an existing scope by [name].
+  ///
+  /// Throws:
+  /// - [ArgumentError] when attempting to close the root scope.
+  /// - [ScopeNotFoundException] when the scope does not exist.
   static void closeScope(String name) {
     if (name == _kRootScope) {
       throw ArgumentError('cannot close root scope');
@@ -45,6 +71,9 @@ class DiScope {
     scope.close();
   }
 
+  /// Finds a scope by [name] in this scope subtree.
+  ///
+  /// Returns `null` when [name] is `null`, empty, or not found.
   DiScope? locateScope(final String? name) {
     if (name == null || name.isEmpty) {
       return null;
@@ -66,15 +95,24 @@ class DiScope {
 
   DiElement? _elementOf<T>(String? tag) => _instances[T]?[tag ?? ''];
 
-  DiElement? _elementOfType(Type type, String? tag) => _instances[type]?[tag ?? ''];
+  DiElement? _elementOfType(Type type, String? tag) =>
+      _instances[type]?[tag ?? ''];
 
+  /// Returns `true` when this scope has a registration for type `T`.
+  ///
+  /// This checks only the current scope, not ancestors.
   bool contains<T>({String? tag}) {
     final item = _elementOf<T>(tag);
     return item != null && item.instance is T;
   }
 
-  bool containsType(Type type, {String? tag}) => _elementOfType(type, tag) != null;
+  /// Returns `true` when this scope has a registration for [type].
+  ///
+  /// This checks only the current scope, not ancestors.
+  bool containsType(Type type, {String? tag}) =>
+      _elementOfType(type, tag) != null;
 
+  /// Returns `true` when `T` is registered in this scope or any ancestor.
   bool isRegistered<T>({String? tag}) {
     if (contains<T>(tag: tag)) {
       return true;
@@ -83,6 +121,7 @@ class DiScope {
     return _parent?.isRegistered<T>(tag: tag) ?? false;
   }
 
+  /// Returns `true` when [type] is registered in this scope or any ancestor.
   bool isRegisteredType(Type type, {String? tag}) {
     if (containsType(type, tag: tag)) {
       return true;
@@ -91,7 +130,9 @@ class DiScope {
     return _parent?.isRegisteredType(type, tag: tag) ?? false;
   }
 
-  T call<T>({String? tag, bool exactTypeMatch = false}) => find<T>(tag: tag, exactTypeMatch: exactTypeMatch);
+  /// Alias for [find].
+  T call<T>({String? tag, bool exactTypeMatch = false}) =>
+      find<T>(tag: tag, exactTypeMatch: exactTypeMatch);
 
   DiScope _rootScope() {
     DiScope current = this;
@@ -102,6 +143,15 @@ class DiScope {
     return current;
   }
 
+  /// Resolves an instance of `T`.
+  ///
+  /// Lookup order:
+  /// 1. Local registration by exact key `T`.
+  /// 2. Local descendant registration where runtime type is assignable to `T`
+  ///    (skipped when [exactTypeMatch] is `true`).
+  /// 3. Parent scopes recursively.
+  ///
+  /// Throws [InstanceNotFoundException] when resolution fails.
   T find<T>({String? tag, bool exactTypeMatch = false}) {
     _assertOpen();
 
@@ -151,6 +201,10 @@ class DiScope {
     return null;
   }
 
+  /// Replaces an existing local registration for `T`.
+  ///
+  /// Existing local value is evicted first (and disposed through callback),
+  /// then [instance] is registered via [put].
   T replace<T>(
     T instance, {
     String? tag,
@@ -170,7 +224,12 @@ class DiScope {
     );
   }
 
-  void replaceLazy<T>(ValueGetter<T> instancer, {String? tag, DisposeCallback<T>? onDispose}) {
+  /// Replaces an existing lazy registration for `T` in this scope.
+  ///
+  /// If an instance exists for the same type/tag in this scope, it is evicted
+  /// first and disposed via its callback.
+  void replaceLazy<T>(ValueGetter<T> instancer,
+      {String? tag, DisposeCallback<T>? onDispose}) {
     _assertOpen();
     if (contains<T>(tag: tag)) {
       evict<T>(tag: tag);
@@ -179,7 +238,14 @@ class DiScope {
     return putLazy<T>(instancer, tag: tag, onDispose: onDispose);
   }
 
-  void putLazy<T>(ValueGetter<T> instancer, {String? tag, DisposeCallback<T>? onDispose}) {
+  /// Registers `T` lazily in the current scope.
+  ///
+  /// The first read materializes the value and caches it.
+  ///
+  /// Throws [DuplicateInstanceException] when a same type/tag registration
+  /// already exists in this scope.
+  void putLazy<T>(ValueGetter<T> instancer,
+      {String? tag, DisposeCallback<T>? onDispose}) {
     _assertOpen();
     var item = _elementOf<T>(tag);
     if (item != null) {
@@ -192,9 +258,18 @@ class DiScope {
     }
 
     var map = _instances.putIfAbsent(T, () => <String, DiElement<T>>{});
-    map[tag ?? ''] = DiElement<T>.lazy(instancer: instancer, tag: tag, onDispose: onDispose);
+    map[tag ?? ''] =
+        DiElement<T>.lazy(instancer: instancer, tag: tag, onDispose: onDispose);
   }
 
+  /// Registers [instance] in the current scope.
+  ///
+  /// By default, registration is created for both `T` and
+  /// `instance.runtimeType` when they differ. Set [registerRuntimeType] to
+  /// `false` to only register under `T`.
+  ///
+  /// Throws [DuplicateInstanceException] when a conflicting registration with
+  /// the same type/tag exists in this scope.
   T put<T>(
     T instance, {
     String? tag,
@@ -213,7 +288,9 @@ class DiScope {
     }
 
     final runtimeType = instance.runtimeType;
-    if (registerRuntimeType && runtimeType != T && containsType(runtimeType, tag: tag)) {
+    if (registerRuntimeType &&
+        runtimeType != T &&
+        containsType(runtimeType, tag: tag)) {
       throw DuplicateInstanceException(
         runtimeType,
         this,
@@ -222,20 +299,28 @@ class DiScope {
       );
     }
 
-    final item = DiElement<T>.direct(item: instance, tag: tag, onDispose: onDispose);
+    final item =
+        DiElement<T>.direct(item: instance, tag: tag, onDispose: onDispose);
     _instances.putIfAbsent(T, () => <String, DiElement>{})[tagKey] = item;
     if (registerRuntimeType && runtimeType != T) {
-      _instances.putIfAbsent(runtimeType, () => <String, DiElement>{})[tagKey] = item;
+      _instances.putIfAbsent(runtimeType, () => <String, DiElement>{})[tagKey] =
+          item;
     }
     return instance;
   }
 
+  /// Clears all instances and child scopes without disposing anything.
+  ///
+  /// Intended for tests and diagnostics.
   void reset() {
     _isClosed = false;
     _instances.clear();
     _subScopes.clear();
   }
 
+  /// Closes this scope, all descendants, and disposes owned instances.
+  ///
+  /// Safe to call multiple times.
   void close() {
     if (!_isClosed) {
       _isClosed = true;
@@ -256,6 +341,12 @@ class DiScope {
     }
   }
 
+  /// Removes and returns a local instance registered for type `T`.
+  ///
+  /// Also removes aliases pointing to the same [DiElement] (for example runtime
+  /// type registrations).
+  ///
+  /// Throws [InstanceNotFoundException] when no local registration exists.
   T evict<T>({String? tag}) {
     _assertOpen();
     final tagKey = tag ?? '';
@@ -302,8 +393,16 @@ class DiScope {
           _isClosed == other._isClosed;
 
   @override
-  int get hashCode => name.hashCode ^ _parent.hashCode ^ _instances.hashCode ^ _subScopes.hashCode ^ _isClosed.hashCode;
+  int get hashCode =>
+      name.hashCode ^
+      _parent.hashCode ^
+      _instances.hashCode ^
+      _subScopes.hashCode ^
+      _isClosed.hashCode;
 
+  /// Prints a human-readable tree of scopes and instances using [debugPrint].
+  ///
+  /// Set [verboseInstaces] to `false` to print only scope names.
   void verboseTree({bool verboseInstaces = true, String? offset}) {
     var tabs = offset ?? '';
     var items = _instances.values.expand((element) => element.values);
@@ -311,7 +410,9 @@ class DiScope {
     if (verboseInstaces) {
       tabs += '\t';
       for (var i in items) {
-        var isReplaced = _parent?.isRegisteredType(i.instance.runtimeType, tag: i.tag) ?? false;
+        var isReplaced =
+            _parent?.isRegisteredType(i.instance.runtimeType, tag: i.tag) ??
+                false;
         debugPrint(
             "$tabs<${i.instance.runtimeType}> ${i.instance}; ${i.tag == null ? '' : '(${i.tag})'}${isReplaced ? ' overrides (${_parent?.name});' : ''}");
       }
@@ -323,12 +424,16 @@ class DiScope {
   }
 }
 
+/// A wrapper around a direct or lazily created scoped instance.
 class DiElement<T> {
   T? _instance;
   final ValueGetter<T>? instancer;
   final String? tag;
   final DisposeCallback<T>? onDispose;
 
+  /// Returns the underlying instance, creating it lazily when needed.
+  ///
+  /// Throws [StateError] when the lazy factory returns `null`.
   T get instance {
     _instance ??= instancer?.call();
     final value = _instance;
@@ -338,6 +443,7 @@ class DiElement<T> {
     return value;
   }
 
+  /// Creates an element holding an already constructed [item].
   DiElement.direct({
     required T item,
     this.tag,
@@ -345,12 +451,14 @@ class DiElement<T> {
   })  : _instance = item,
         instancer = null;
 
+  /// Creates an element backed by a lazy [instancer] callback.
   DiElement.lazy({
     required this.instancer,
     this.tag,
     this.onDispose,
   }) : _instance = null;
 
+  /// Disposes the current materialized instance if present.
   void dispose() {
     final value = _instance;
     if (value != null) {
@@ -366,7 +474,11 @@ class DiElement<T> {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is DiElement && runtimeType == other.runtimeType && instance == other.instance && tag == other.tag && onDispose == other.onDispose;
+      other is DiElement &&
+          runtimeType == other.runtimeType &&
+          instance == other.instance &&
+          tag == other.tag &&
+          onDispose == other.onDispose;
 
   @override
   int get hashCode => instance.hashCode ^ tag.hashCode ^ onDispose.hashCode;
