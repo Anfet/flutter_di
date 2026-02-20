@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-import 'package:flutter_di/src/exceptions.dart';
+import 'package:simple_service_locator/src/exceptions.dart';
 
 typedef DisposeCallback<T> = void Function(T);
 
@@ -130,12 +130,16 @@ class DiScope {
     final checked = Set<DiElement>.identity();
     for (final entry in _instances.entries) {
       final item = entry.value[tagKey];
-      if (item == null || !checked.add(item)) {
+      if (item == null) {
         continue;
       }
 
       // Consider only concrete runtime registrations when resolving descendants.
       if (entry.key != item.instance.runtimeType) {
+        continue;
+      }
+
+      if (!checked.add(item)) {
         continue;
       }
 
@@ -300,16 +304,15 @@ class DiScope {
   @override
   int get hashCode => name.hashCode ^ _parent.hashCode ^ _instances.hashCode ^ _subScopes.hashCode ^ _isClosed.hashCode;
 
-  // ignore: avoid_print
   void verboseTree({bool verboseInstaces = true, String? offset}) {
     var tabs = offset ?? '';
     var items = _instances.values.expand((element) => element.values);
-    print("$tabs$name");
+    debugPrint("$tabs$name");
     if (verboseInstaces) {
       tabs += '\t';
       for (var i in items) {
         var isReplaced = _parent?.isRegisteredType(i.instance.runtimeType, tag: i.tag) ?? false;
-        print(
+        debugPrint(
             "$tabs<${i.instance.runtimeType}> ${i.instance}; ${i.tag == null ? '' : '(${i.tag})'}${isReplaced ? ' overrides (${_parent?.name});' : ''}");
       }
     }
@@ -328,7 +331,11 @@ class DiElement<T> {
 
   T get instance {
     _instance ??= instancer?.call();
-    return _instance!;
+    final value = _instance;
+    if (value == null) {
+      throw StateError('DiElement instance is null');
+    }
+    return value;
   }
 
   DiElement.direct({
@@ -345,8 +352,9 @@ class DiElement<T> {
   }) : _instance = null;
 
   void dispose() {
-    if (_instance != null) {
-      onDispose?.call(_instance!);
+    final value = _instance;
+    if (value != null) {
+      onDispose?.call(value);
     }
   }
 

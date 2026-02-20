@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_di/flutter_di.dart';
+import 'package:simple_service_locator/simple_service_locator.dart';
 
 void main() {
   tearDown(() {
@@ -23,7 +23,7 @@ void main() {
 }
 
 class TestClass {
-  final data;
+  final String data;
   bool disposed = false;
 
   TestClass(this.data);

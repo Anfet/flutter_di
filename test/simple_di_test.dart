@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_di/flutter_di.dart';
+import 'package:simple_service_locator/simple_service_locator.dart';
 
 void main() {
   tearDown(() {
@@ -98,7 +98,7 @@ void main() {
       onDispose: (p0) {},
     );
     const b = 2;
-    RootScope.replace<int>(b, onDispose: (p0) => null);
+    RootScope.replace<int>(b, onDispose: (p0) {});
     expect(RootScope.find<int>(), b);
   });
 
@@ -171,6 +171,17 @@ void main() {
     scope.close();
   });
 
+  test('find resolves intermediate abstraction from aliased runtime registration', () {
+    final scope = DiScope.open('root');
+    final repo = ImplementationC();
+    scope.put<ContractA>(repo);
+
+    expect(scope.find<ContractA>(), same(repo));
+    expect(scope.find<ImplementationC>(), same(repo));
+    expect(scope.find<ContractB>(), same(repo));
+    scope.close();
+  });
+
   test('duplicate scope names are rejected', () {
     final root = DiScope.open('root');
     DiScope.open('child', knownParentScope: root);
@@ -213,3 +224,9 @@ void main() {
 abstract interface class ViewModelAbstraction {}
 
 class ViewModelImplementation implements ViewModelAbstraction {}
+
+abstract interface class ContractA {}
+
+abstract interface class ContractB implements ContractA {}
+
+class ImplementationC implements ContractB {}
