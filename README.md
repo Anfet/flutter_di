@@ -22,10 +22,12 @@ Useful when you need:
 - Register direct instances: `put<T>()`, `replace<T>()`
 - Register lazy instances: `putLazy<T>()`, `replaceLazy<T>()`
 - Resolve dependencies: `find<T>()` or `scope<T>()`
+- Resolve in descendants only: `findInChildren<T>()`
 - Support abstraction + implementation lookup for same object
 - Support tagged registrations (`tag`)
 - Remove instances (`evict<T>()`)
 - Scope tree lookup by name (`locateScope`)
+- Scope lookup by registration/type tag (`locateScopes`, `locateScopesByTag`)
 - Widget helper mixin (`ScopedWidgetState`)
 
 ## Getting Started
@@ -90,8 +92,24 @@ final service = RootScope.find<ExpensiveService>(); // created on first access
 
 - `find<T>()` (default `exactTypeMatch: false`) can resolve descendants by runtime type.
 - `find<T>(exactTypeMatch: true)` restricts lookup to exact registered type keys.
+- `find<T>(searchDescendants: true, onMany: ...)` also searches child scopes.
+- `findInChildren<T>(onMany: ...)` searches only child scopes; without `onMany` it throws `MultipleInstancesFoundException` on ambiguous matches.
 - `put<T>(instance)` registers under `T`, and by default also under `instance.runtimeType`.
 - Set `registerRuntimeType: false` to disable runtime-type alias registration.
+
+## Advanced Scope Queries
+
+```dart
+final root = DiScope.open('root');
+final auth = DiScope.open('auth', knownParentScope: root);
+final profile = DiScope.open('profile', knownParentScope: root);
+
+auth.put<ApiClient>(ApiClientProd(), tag: 'prod');
+profile.put<ApiClient>(ApiClientMock(), tag: 'mock');
+
+final prodOnlyScopes = root.locateScopes<ApiClient>(tag: 'prod');
+final taggedScopes = root.locateScopesByTag('mock');
+```
 
 ## Flutter Widget Scope Helper
 

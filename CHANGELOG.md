@@ -1,3 +1,42 @@
+## 0.1.2
+
+### Added
+
+- Child-scope-only dependency lookup:
+  - `DiScope.findInChildren<T>({tag, exactTypeMatch, onMany})`
+  - throws `MultipleInstancesFoundException` when more than one child scope matches and no `onMany` resolver is provided
+- Optional child-tree lookup on `find`:
+  - `DiScope.find<T>({..., searchDescendants: true, onMany})`
+  - keeps default behavior unchanged when omitted (`false`)
+- Scope discovery by local registrations:
+  - `DiScope.locateScopes<T>({tag, exactTypeMatch, includeSelf})`
+  - `DiScope.locateScopesByTag(tag, {includeSelf})`
+
+### Changed
+
+- Removed internal `_rootScope()` traversal and inlined duplicate scope checks against `RootScope`.
+- Added regression tests for child lookup:
+  - successful resolution in nested descendants
+  - not-found behavior
+  - ambiguity details in `MultipleInstancesFoundException`
+  - `find(..., searchDescendants: true)` and default non-descendant behavior
+
+## 0.1.1
+
+### Added
+
+- Added publish-ready package example:
+  - `example/simple_service_locator_example.dart`
+- Expanded dartdoc coverage for public API:
+  - exception constructors
+  - `DiElement` public fields
+
+### Changed
+
+- Improved `DiScope.verboseTree` parameter naming:
+  - added `verboseInstances`
+  - kept `verboseInstaces` for backward compatibility
+
 ## 0.1.0
 
 ### Added

@@ -6,10 +6,10 @@ typedef DisposeCallback<T> = void Function(T);
 
 const _kRootScope = 'RootScope';
 
-// ignore: non_constant_identifier_names
 /// The singleton root scope for the application.
 ///
 /// All scopes are attached to this scope directly or indirectly.
+// ignore: non_constant_identifier_names
 final RootScope = DiScope._root();
 
 /// A named dependency scope that supports hierarchical lookup.
@@ -46,7 +46,7 @@ class DiScope {
     _parent = knownParentScope ??
         RootScope.locateScope(lookupParentScope) ??
         RootScope;
-    final root = _parent?._rootScope() ?? this;
+    final root = RootScope;
     if (root.locateScope(name) != null) {
       throw DuplicateScopeException(name, root);
     }
@@ -131,17 +131,18 @@ class DiScope {
   }
 
   /// Alias for [find].
-  T call<T>({String? tag, bool exactTypeMatch = false}) =>
-      find<T>(tag: tag, exactTypeMatch: exactTypeMatch);
-
-  DiScope _rootScope() {
-    DiScope current = this;
-    while (current._parent != null) {
-      current = current._parent!;
-    }
-
-    return current;
-  }
+  T call<T>({
+    String? tag,
+    bool exactTypeMatch = false,
+    bool searchDescendants = false,
+    T Function(Iterable<T> children)? onMany,
+  }) =>
+      find<T>(
+        tag: tag,
+        exactTypeMatch: exactTypeMatch,
+        searchDescendants: searchDescendants,
+        onMany: onMany,
+      );
 
   /// Resolves an instance of `T`.
   ///
@@ -150,29 +151,180 @@ class DiScope {
   /// 2. Local descendant registration where runtime type is assignable to `T`
   ///    (skipped when [exactTypeMatch] is `true`).
   /// 3. Parent scopes recursively.
+  /// 4. Child scopes when [searchDescendants] is `true`.
   ///
   /// Throws [InstanceNotFoundException] when resolution fails.
-  T find<T>({String? tag, bool exactTypeMatch = false}) {
+  T find<T>({
+    String? tag,
+    bool exactTypeMatch = false,
+    bool searchDescendants = false,
+    T Function(Iterable<T> children)? onMany,
+  }) {
     _assertOpen();
 
+    final local = _findLocal<T>(tag: tag, exactTypeMatch: exactTypeMatch);
+    if (local != null) {
+      return local;
+    }
+
+    InstanceNotFoundException? parentMiss;
+    T? parent;
+    try {
+      parent = _parent?.find<T>(
+        tag: tag,
+        exactTypeMatch: exactTypeMatch,
+        searchDescendants: false,
+      );
+    } on InstanceNotFoundException catch (ex) {
+      parentMiss = ex;
+    }
+    if (parent != null) {
+      return parent;
+    }
+
+    if (searchDescendants) {
+      try {
+        return findInChildren<T>(
+          tag: tag,
+          exactTypeMatch: exactTypeMatch,
+          onMany: onMany,
+        );
+      } on InstanceNotFoundException {
+        if (parentMiss != null) {
+          throw parentMiss;
+        }
+      }
+    }
+
+    if (parentMiss != null) {
+      throw parentMiss;
+    }
+
+    throw InstanceNotFoundException(T, this, tag: tag);
+  }
+
+  /// Resolves an instance of `T` only in descendant scopes.
+  ///
+  /// This does not search current scope or ancestors.
+  ///
+  /// Throws:
+  /// - [InstanceNotFoundException] when no descendants match.
+  /// - [MultipleInstancesFoundException] when more than one descendant matches.
+  T findInChildren<T>({
+    String? tag,
+    bool exactTypeMatch = false,
+    T Function(Iterable<T> children)? onMany,
+  }) {
+    _assertOpen();
+    final matches = <_ScopedMatch<T>>[];
+    final visited = <DiScope>{this};
+    final queue = List<DiScope>.from(_subScopes);
+    while (queue.isNotEmpty) {
+      final scope = queue.removeAt(0);
+      if (!visited.add(scope)) {
+        continue;
+      }
+
+      final value =
+          scope._findLocal<T>(tag: tag, exactTypeMatch: exactTypeMatch);
+      if (value != null) {
+        matches.add(_ScopedMatch(scope: scope, value: value));
+      }
+      queue.addAll(scope._subScopes);
+    }
+
+    if (matches.isEmpty) {
+      throw InstanceNotFoundException(T, this, tag: tag);
+    }
+    if (matches.length > 1) {
+      if (onMany != null) {
+        return onMany(matches.map((m) => m.value));
+      }
+      throw MultipleInstancesFoundException(
+        T,
+        this,
+        tag: tag,
+        matches: matches.map((m) => m.scope).toList(growable: false),
+      );
+    }
+
+    return matches.first.value;
+  }
+
+  /// Finds descendant scopes containing a registration matching `T` and [tag].
+  ///
+  /// Set [includeSelf] to include the current scope in the search.
+  List<DiScope> locateScopes<T>({
+    String? tag,
+    bool exactTypeMatch = false,
+    bool includeSelf = true,
+  }) {
+    _assertOpen();
+    final result = <DiScope>[];
+    final visited = <DiScope>{};
+    final queue = <DiScope>[];
+    if (includeSelf) {
+      queue.add(this);
+    } else {
+      queue.addAll(_subScopes);
+    }
+
+    while (queue.isNotEmpty) {
+      final scope = queue.removeAt(0);
+      if (!visited.add(scope)) {
+        continue;
+      }
+
+      if (scope._findLocal<T>(tag: tag, exactTypeMatch: exactTypeMatch) !=
+          null) {
+        result.add(scope);
+      }
+      queue.addAll(scope._subScopes);
+    }
+
+    return result;
+  }
+
+  /// Finds descendant scopes that have any local registration with [tag].
+  ///
+  /// Set [includeSelf] to include the current scope in the search.
+  List<DiScope> locateScopesByTag(String tag, {bool includeSelf = true}) {
+    _assertOpen();
+    final result = <DiScope>[];
+    final visited = <DiScope>{};
+    final queue = <DiScope>[];
+    if (includeSelf) {
+      queue.add(this);
+    } else {
+      queue.addAll(_subScopes);
+    }
+
+    while (queue.isNotEmpty) {
+      final scope = queue.removeAt(0);
+      if (!visited.add(scope)) {
+        continue;
+      }
+
+      if (scope._containsTag(tag)) {
+        result.add(scope);
+      }
+      queue.addAll(scope._subScopes);
+    }
+
+    return result;
+  }
+
+  T? _findLocal<T>({String? tag, required bool exactTypeMatch}) {
     final element = _elementOf<T>(tag);
     if (element != null && element.instance is T) {
       return element.instance as T;
     }
 
     if (!exactTypeMatch) {
-      final localDescendant = _findDescendant<T>(tag);
-      if (localDescendant != null) {
-        return localDescendant;
-      }
+      return _findDescendant<T>(tag);
     }
 
-    final parent = _parent?.find<T>(tag: tag, exactTypeMatch: exactTypeMatch);
-    if (parent == null) {
-      throw InstanceNotFoundException(T, this, tag: tag);
-    }
-
-    return parent;
+    return null;
   }
 
   T? _findDescendant<T>(String? tag) {
@@ -199,6 +351,16 @@ class DiScope {
     }
 
     return null;
+  }
+
+  bool _containsTag(String tag) {
+    for (final entries in _instances.values) {
+      if (entries.containsKey(tag)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /// Replaces an existing local registration for `T`.
@@ -402,12 +564,19 @@ class DiScope {
 
   /// Prints a human-readable tree of scopes and instances using [debugPrint].
   ///
-  /// Set [verboseInstaces] to `false` to print only scope names.
-  void verboseTree({bool verboseInstaces = true, String? offset}) {
+  /// Set [verboseInstances] to `false` to print only scope names.
+  ///
+  /// [verboseInstaces] is kept for backward compatibility.
+  void verboseTree({
+    bool verboseInstaces = true,
+    bool? verboseInstances,
+    String? offset,
+  }) {
+    final shouldPrintInstances = verboseInstances ?? verboseInstaces;
     var tabs = offset ?? '';
     var items = _instances.values.expand((element) => element.values);
     debugPrint("$tabs$name");
-    if (verboseInstaces) {
+    if (shouldPrintInstances) {
       tabs += '\t';
       for (var i in items) {
         var isReplaced =
@@ -424,11 +593,24 @@ class DiScope {
   }
 }
 
+class _ScopedMatch<T> {
+  final DiScope scope;
+  final T value;
+
+  _ScopedMatch({required this.scope, required this.value});
+}
+
 /// A wrapper around a direct or lazily created scoped instance.
 class DiElement<T> {
   T? _instance;
+
+  /// Lazily creates the element value when [instance] is first accessed.
   final ValueGetter<T>? instancer;
+
+  /// Optional tag associated with this registration.
   final String? tag;
+
+  /// Optional callback invoked when the element is disposed or evicted.
   final DisposeCallback<T>? onDispose;
 
   /// Returns the underlying instance, creating it lazily when needed.

@@ -7,7 +7,7 @@ void main() {
   });
 
   test('a', () async {
-    final root = DiScope.open('root');
+    final root = DiScope.open('test_root');
     final item = TestClass('somedata');
     root.put<TestClass>(
       item,

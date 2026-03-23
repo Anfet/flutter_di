@@ -25,6 +25,7 @@ class InstanceNotFoundException extends DependencyException {
   /// Scope where lookup started.
   final DiScope scope;
 
+  /// Creates an exception for missing [requestedType] lookup in [scope].
   InstanceNotFoundException(
     this.requestedType,
     this.scope, {
@@ -39,6 +40,7 @@ class ScopeNotFoundException extends DependencyException {
   /// Missing scope name.
   final String name;
 
+  /// Creates an exception for unknown scope [name].
   ScopeNotFoundException(this.name) : super("scope '$name' not found");
 }
 
@@ -50,6 +52,7 @@ class DuplicateScopeException extends DependencyException {
   /// Scope tree root where duplication was detected.
   final DiScope scope;
 
+  /// Creates an exception for duplicate scope [name] in [scope] tree.
   DuplicateScopeException(this.name, this.scope)
       : super("scope '$name' is already present in '${scope.name}' scope tree");
 }
@@ -68,6 +71,7 @@ class DuplicateInstanceException extends DependencyException {
   /// Scope where the conflict occurred.
   final DiScope scope;
 
+  /// Creates an exception for conflicting [registeredType] in [scope].
   DuplicateInstanceException(
     this.registeredType,
     this.scope, {
@@ -75,5 +79,30 @@ class DuplicateInstanceException extends DependencyException {
     this.tag,
   }) : super(
           "$registeredType (instance: $instanceType, tag: '${tag ?? ''}') is already present in '${scope.name}' scope; use replace = true",
+        );
+}
+
+/// Thrown when lookup in child scopes matches more than one registration.
+class MultipleInstancesFoundException extends DependencyException {
+  /// Requested type used in lookup.
+  final Type requestedType;
+
+  /// Optional registration tag used for lookup.
+  final String? tag;
+
+  /// Scope where lookup started.
+  final DiScope scope;
+
+  /// Child scopes that matched the lookup.
+  final List<DiScope> matches;
+
+  /// Creates an exception for ambiguous child lookup in [scope].
+  MultipleInstancesFoundException(
+    this.requestedType,
+    this.scope, {
+    required this.matches,
+    this.tag,
+  }) : super(
+          "multiple '$requestedType' instances with tag '${tag ?? ''}' found in child scopes of '${scope.name}': ${matches.map((s) => s.name).join(', ')}",
         );
 }
