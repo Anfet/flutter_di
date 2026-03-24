@@ -116,7 +116,11 @@ final taggedScopes = root.locateScopesByTag('mock');
 ```dart
 class ProfilePageState extends State<ProfilePage> with ScopedWidgetState<ProfilePage> {
   @override
+  String get scopeName => 'profile_scope';
+
+  @override
   void injectDependencies() {
+    super.injectDependencies();
     scope.put<ProfileViewModel>(ProfileViewModel(RootScope.find()));
   }
 }

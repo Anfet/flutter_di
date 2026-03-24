@@ -1,3 +1,16 @@
+## 0.1.3
+
+### Added
+
+- `ScopedWidgetState.scopeName` overridable getter for custom widget scope naming.
+- Widget tests covering:
+  - custom scope name usage
+  - automatic scope close on widget dispose
+
+### Changed
+
+- `ScopedWidgetState` now initializes scope inside `injectDependencies()`; method is marked `@mustCallSuper`.
+
 ## 0.1.2
 
 ### Added
