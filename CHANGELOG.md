@@ -1,3 +1,18 @@
+## 0.1.4
+
+### Added
+
+- Widget tests covering scope provision, scope consumption, and missing scope errors.
+
+### Changed
+
+- Updated public library docs to reference `ScopeProviderState` and `ScopeConsumerState`.
+
+### Breaking Changes
+
+- `ScopedWidgetState` was split into `ScopeProviderState` and `ScopeConsumerState`.
+- Update widget mixin usages and imports to the new names.
+
 ## 0.1.3
 
 ### Added

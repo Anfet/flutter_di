@@ -28,7 +28,7 @@ Useful when you need:
 - Remove instances (`evict<T>()`)
 - Scope tree lookup by name (`locateScope`)
 - Scope lookup by registration/type tag (`locateScopes`, `locateScopesByTag`)
-- Widget helper mixin (`ScopedWidgetState`)
+- Widget helper mixins (`ScopeProviderState`, `ScopeConsumerState`)
 
 ## Getting Started
 
@@ -114,7 +114,7 @@ final taggedScopes = root.locateScopesByTag('mock');
 ## Flutter Widget Scope Helper
 
 ```dart
-class ProfilePageState extends State<ProfilePage> with ScopedWidgetState<ProfilePage> {
+class ProfilePageState extends State<ProfilePage> with ScopeProviderState<ProfilePage> {
   @override
   String get scopeName => 'profile_scope';
 
