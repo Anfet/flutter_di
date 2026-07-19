@@ -1,3 +1,9 @@
+## 0.1.5
+
+### Added
+
+- `DiScope` now extends `ChangeNotifier` and notifies listeners after scope and registration changes.
+
 ## 0.1.4
 
 ### Added

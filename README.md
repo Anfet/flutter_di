@@ -28,6 +28,7 @@ Useful when you need:
 - Remove instances (`evict<T>()`)
 - Scope tree lookup by name (`locateScope`)
 - Scope lookup by registration/type tag (`locateScopes`, `locateScopesByTag`)
+- Listen for scope changes with `addListener()`
 - Widget helper mixins (`ScopeProviderState`, `ScopeConsumerState`)
 
 ## Getting Started
@@ -69,6 +70,21 @@ final fromFeature = featureScope.find<ApiClient>(); // ApiClientMock
 final fromApp = appScope.find<ApiClient>(); // ApiClientProd
 
 appScope.close(); // closes children and disposes registered instances
+```
+
+## Observing Scope Changes
+
+`DiScope` extends Flutter's `ChangeNotifier`. A listener is called after a
+registration is added, replaced, or evicted, and when child scopes are opened
+or closed.
+
+```dart
+final scope = DiScope.open('cart');
+scope.addListener(() {
+  // Refresh state derived from this scope.
+});
+
+scope.put<CartService>(CartService());
 ```
 
 ## Tags

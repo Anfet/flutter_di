@@ -16,6 +16,31 @@ void main() {
     scope.close();
   });
 
+  test('scope notifies listeners after registration changes', () {
+    final scope = DiScope.open('test_root');
+    var notifications = 0;
+    scope.addListener(() => notifications++);
+
+    scope.put<int>(1);
+    scope.replace<int>(2);
+    scope.evict<int>();
+
+    expect(notifications, 3);
+    scope.close();
+  });
+
+  test('parent scope notifies listeners when child scope opens and closes', () {
+    final parent = DiScope.open('test_root');
+    var notifications = 0;
+    parent.addListener(() => notifications++);
+
+    final child = DiScope.open('child', knownParentScope: parent);
+    child.close();
+
+    expect(notifications, 2);
+    parent.close();
+  });
+
   test('untagged contains', () {
     final scope = DiScope.open('test_root');
     const source = 1;

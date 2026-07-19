@@ -17,7 +17,7 @@ final RootScope = DiScope._root();
 /// Instances can be registered directly or lazily and resolved by type
 /// (optionally with a [tag]). Child scopes can override registrations from
 /// parent scopes.
-class DiScope {
+class DiScope extends ChangeNotifier {
   /// A human-readable unique scope name within a root scope tree.
   final String name;
   late final DiScope? _parent;
@@ -51,6 +51,7 @@ class DiScope {
       throw DuplicateScopeException(name, root);
     }
     _parent?._subScopes.add(this);
+    _parent?.notifyListeners();
   }
 
   /// Closes an existing scope by [name].
@@ -375,14 +376,15 @@ class DiScope {
   }) {
     _assertOpen();
     if (contains<T>(tag: tag)) {
-      evict<T>(tag: tag);
+      _evict<T>(tag: tag);
     }
 
-    return put<T>(
+    return _put<T>(
       instance,
       tag: tag,
       onDispose: onDispose,
       registerRuntimeType: registerRuntimeType,
+      notify: true,
     );
   }
 
@@ -394,10 +396,11 @@ class DiScope {
       {String? tag, DisposeCallback<T>? onDispose}) {
     _assertOpen();
     if (contains<T>(tag: tag)) {
-      evict<T>(tag: tag);
+      _evict<T>(tag: tag);
     }
 
-    return putLazy<T>(instancer, tag: tag, onDispose: onDispose);
+    _putLazy<T>(instancer, tag: tag, onDispose: onDispose);
+    notifyListeners();
   }
 
   /// Registers `T` lazily in the current scope.
@@ -419,9 +422,8 @@ class DiScope {
       );
     }
 
-    var map = _instances.putIfAbsent(T, () => <String, DiElement<T>>{});
-    map[tag ?? ''] =
-        DiElement<T>.lazy(instancer: instancer, tag: tag, onDispose: onDispose);
+    _putLazy<T>(instancer, tag: tag, onDispose: onDispose);
+    notifyListeners();
   }
 
   /// Registers [instance] in the current scope.
@@ -437,6 +439,21 @@ class DiScope {
     String? tag,
     DisposeCallback<T>? onDispose,
     bool registerRuntimeType = true,
+  }) =>
+      _put<T>(
+        instance,
+        tag: tag,
+        onDispose: onDispose,
+        registerRuntimeType: registerRuntimeType,
+        notify: true,
+      );
+
+  T _put<T>(
+    T instance, {
+    String? tag,
+    DisposeCallback<T>? onDispose,
+    required bool registerRuntimeType,
+    required bool notify,
   }) {
     _assertOpen();
     final tagKey = tag ?? '';
@@ -468,7 +485,20 @@ class DiScope {
       _instances.putIfAbsent(runtimeType, () => <String, DiElement>{})[tagKey] =
           item;
     }
+    if (notify) {
+      notifyListeners();
+    }
     return instance;
+  }
+
+  void _putLazy<T>(
+    ValueGetter<T> instancer, {
+    String? tag,
+    DisposeCallback<T>? onDispose,
+  }) {
+    var map = _instances.putIfAbsent(T, () => <String, DiElement<T>>{});
+    map[tag ?? ''] =
+        DiElement<T>.lazy(instancer: instancer, tag: tag, onDispose: onDispose);
   }
 
   /// Clears all instances and child scopes without disposing anything.
@@ -478,6 +508,7 @@ class DiScope {
     _isClosed = false;
     _instances.clear();
     _subScopes.clear();
+    notifyListeners();
   }
 
   /// Closes this scope, all descendants, and disposes owned instances.
@@ -487,6 +518,7 @@ class DiScope {
     if (!_isClosed) {
       _isClosed = true;
       _parent?._subScopes.remove(this);
+      _parent?.notifyListeners();
 
       for (var s in List<DiScope>.from(_subScopes)) {
         s.close();
@@ -500,6 +532,8 @@ class DiScope {
 
       _instances.clear();
       _subScopes.clear();
+      notifyListeners();
+      super.dispose();
     }
   }
 
@@ -511,6 +545,12 @@ class DiScope {
   /// Throws [InstanceNotFoundException] when no local registration exists.
   T evict<T>({String? tag}) {
     _assertOpen();
+    final value = _evict<T>(tag: tag);
+    notifyListeners();
+    return value;
+  }
+
+  T _evict<T>({String? tag}) {
     final tagKey = tag ?? '';
     final item = _instances[T]?[tagKey] as DiElement<T>?;
     if (item == null) {
