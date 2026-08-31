@@ -35,7 +35,7 @@ Useful when you need:
 
 ```yaml
 dependencies:
-  simple_service_locator: ^0.2.0
+  simple_service_locator: ^0.3.0
 ```
 
 ## Quick Usage
@@ -78,6 +78,11 @@ appScope.close(); // closes children and disposes registered instances
 registration is added, replaced, or evicted, and when child scopes are opened
 or closed.
 
+A listener may mutate the scope it observes — open a child scope, register a
+dependency, or close the scope itself. Nested notifications triggered from
+inside a listener are suppressed, so the listener is not re-entered before it
+returns; the outer notification already reports the final state.
+
 ```dart
 final scope = DiScope.open('cart');
 scope.addListener(() {
@@ -115,7 +120,8 @@ final byImplementation = RootScope.find<UserRepositoryFirebase>();
 ```
 
 Registration checks, replacements, diagnostics, and closing an unused lazy
-registration do not invoke its factory.
+registration do not invoke its factory. A factory that throws leaves its
+registration unmaterialized, so the next lookup retries it.
 
 ## Lookup Behavior
 
@@ -126,6 +132,8 @@ registration do not invoke its factory.
 - `put<B>(B())` registers only `B`; resolving an interface or superclass requires registering that type explicitly.
 - `putLazyAs<A, B>(() => B())` lazily registers both explicit keys. `putLazy<A>()` registers only `A`.
 - Set `registerRuntimeType: false` to disable runtime-type alias registration.
+- Keys are non-nullable (`T extends Object`). Register an explicit wrapper or a
+  sentinel value when you need to model "configured, but absent".
 
 ## Advanced Scope Queries
 
@@ -146,7 +154,7 @@ final taggedScopes = root.locateScopesByTag('mock');
 ```dart
 class ProfilePageState extends State<ProfilePage> with ScopeProviderState<ProfilePage> {
   @override
-  String get scopeName => 'profile:${widget.profileId}';
+  String get scopeName => 'profile';
 
   @override
   DiScope get parentScope => RootScope;
@@ -163,6 +171,24 @@ class ProfilePageState extends State<ProfilePage> with ScopeProviderState<Profil
 constructor or use a known globally unique scope name when another object must
 access it. There is no widget consumer lookup helper.
 
+### Scope Lifetime
+
+The scope belongs to the `State`, not to the widget configuration:
+
+- `scopeName` is read once, when the scope is opened. Deriving it from a widget
+  field (`'profile:${widget.profileId}'`) does **not** reopen the scope when
+  that field changes — the state keeps the scope it opened. Put a `ValueKey` on
+  the widget when a new configuration must get a fresh scope and fresh
+  dependencies.
+- The scope is released in `deactivate()` and reopened in `activate()`, so the
+  name is free as soon as the state leaves the tree. This keeps an ordinary
+  widget replacement (Flutter runs the new `initState()` before the old
+  `dispose()`) from throwing `DuplicateScopeException`.
+- Because a deactivated state's scope is closed and rebuilt, anything
+  registered in `injectDependencies()` is recreated when the state is
+  reinserted through a `GlobalKey` move. Dependencies that must survive such a
+  move belong in a parent scope.
+
 ## Cases That Fit Pub.dev Consumers Well
 
 - multi-environment service wiring (prod/stage/dev with tags)
@@ -177,4 +203,12 @@ access it. There is no widget consumer lookup helper.
 - Closing a scope disposes registered instances once, even when they were registered under multiple type aliases.
 - If a disposal callback throws, the scope still closes and disposes remaining registrations before rethrowing the first error.
 - Scope names must be non-empty.
+- `DiScope.open(..., lookupParentScope: name)` throws `ScopeNotFoundException`
+  when `name` does not resolve. Omit the argument to attach to `RootScope`.
+- Presence checks (`contains`, `isRegistered`) throw `StateError` on a closed
+  scope rather than answering `false`.
+- Registration and lookup keys must be non-nullable. `put<T?>(...)`,
+  `find<T?>()` and friends do not compile: every generic entry point is bound
+  as `T extends Object`, so a missing dependency is always a
+  `InstanceNotFoundException` rather than a silent `null`.
 - `RootScope` is process-lifetime and cannot be closed. `reset()` closes child scopes and disposes registrations while keeping the current scope reusable.

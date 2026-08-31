@@ -78,7 +78,7 @@ class DuplicateInstanceException extends DependencyException {
     required this.instanceType,
     this.tag,
   }) : super(
-          "$registeredType (instance: $instanceType, tag: '${tag ?? ''}') is already present in '${scope.name}' scope; use replace = true",
+          "$registeredType (instance: $instanceType, tag: '${tag ?? ''}') is already present in '${scope.name}' scope; use replace<T>() to override it",
         );
 }
 

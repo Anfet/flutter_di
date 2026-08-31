@@ -2,10 +2,12 @@
 ///
 /// Import this library to access:
 /// - [DiScope] for dependency registration and lookup.
+/// - [DiElement] describing a single direct or lazy registration.
 /// - typed exceptions describing dependency lookup/registration errors.
 /// - [ScopeProviderState] for widget-bound scope lifecycle management.
 library simple_service_locator;
 
+export 'src/di_element.dart';
 export 'src/di_scope.dart';
 export 'src/exceptions.dart';
 export 'src/ext/scope_provider_state.dart';

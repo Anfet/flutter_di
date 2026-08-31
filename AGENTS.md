@@ -11,7 +11,7 @@ Guidance for AI/code agents working in this repository.
 - Main API surface:
   - `lib/src/di_scope.dart`
   - `lib/src/exceptions.dart`
-  - `lib/src/ext/scoped_widget_state.dart`
+  - `lib/src/ext/scope_provider_state.dart`
 
 ## Working Rules
 

@@ -6,7 +6,7 @@ void main() {
     RootScope.reset();
   });
 
-  test('a', () async {
+  test('close invokes the dispose callback of a registered instance', () {
     final root = DiScope.open('test_root');
     final item = TestClass('somedata');
     root.put<TestClass>(
@@ -16,8 +16,8 @@ void main() {
       },
     );
 
-    // var evicted = root.evict<TestClass>();
     root.close();
+
     expect(item.disposed, isTrue);
   });
 }
