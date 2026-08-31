@@ -1,3 +1,45 @@
+## 0.2.0
+
+### Added
+
+- `putLazyAs<A, B>()` and `replaceLazyAs<A, B>()` for lazy registrations with
+  explicit abstraction and implementation keys.
+
+### Changed
+
+- Dependency lookup now resolves only explicit registration keys.
+- `put<A>(B())` still registers both `A` and concrete type `B` by default.
+- `DiScope.close()` now completes descendant and registration cleanup before
+  rethrowing the first disposal or listener error.
+- Lazy factories are invoked only by resolution, not by registration checks,
+  replacements, or diagnostics.
+- Scope names must be non-empty.
+- Closed scopes can no longer be reopened with `reset()`.
+- Enabled strict cast, inference, and raw-type checks in the Dart analyzer.
+
+### Fixed
+
+- `evict` now supports removal through a concrete runtime-type alias.
+- Missing-instance errors now report the scope where lookup started.
+- Widget scope disposal always invokes `State.dispose()`.
+- Scope-tree traversal uses FIFO queues instead of repeatedly shifting lists.
+- Direct `RootScope.close()` now rejects the same way as `closeScope('RootScope')`.
+
+### Breaking Changes
+
+- Removed implicit assignable-type lookup. After `put<B>(B())`, `find<A>()`
+  now throws unless `A` was explicitly registered.
+- Removed the `exactTypeMatch` parameter from `call`, `find`, `findInChildren`,
+  and `locateScopes`; all lookups now use explicit keys.
+- `reset()` now closes child scopes and disposes local registrations before
+  keeping the current scope reusable.
+- `DiScope` and `DiElement` now use identity equality. The previous structural
+  equality and mutable hash codes were removed.
+- Removed `ScopeConsumerState` from the public API. Pass a [DiScope] explicitly
+  or use an explicit lookup by globally unique scope name.
+- `ScopeProviderState.scopeName` is now required. `parentScope` can be
+  overridden to attach to an explicit parent scope.
+
 ## 0.1.5
 
 ### Added

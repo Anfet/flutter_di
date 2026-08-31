@@ -180,27 +180,117 @@ void main() {
     scope.close();
   });
 
-  test('find resolves descendant when exact type is not required', () {
+  test('contains does not create a lazy registration', () {
+    final scope = DiScope.open('test_root');
+    var factoryCalls = 0;
+    scope.putLazy<ViewModelAbstraction>(() {
+      factoryCalls++;
+      return ViewModelImplementation();
+    });
+
+    expect(scope.contains<ViewModelAbstraction>(), isTrue);
+    expect(scope.isRegistered<ViewModelAbstraction>(), isTrue);
+    expect(factoryCalls, 0);
+    scope.close();
+  });
+
+  test('replaceLazy does not create an unused lazy registration', () {
+    final scope = DiScope.open('test_root');
+    var factoryCalls = 0;
+    var disposed = false;
+    scope.putLazy<ViewModelAbstraction>(
+      () {
+        factoryCalls++;
+        return ViewModelImplementation();
+      },
+      onDispose: (_) => disposed = true,
+    );
+    final replacement = ViewModelImplementation();
+
+    scope.replaceLazy<ViewModelAbstraction>(() => replacement);
+
+    expect(factoryCalls, 0);
+    expect(disposed, isFalse);
+    expect(scope.find<ViewModelAbstraction>(), same(replacement));
+    scope.close();
+  });
+
+  test('putLazyAs registers abstraction and implementation keys lazily', () {
+    final scope = DiScope.open('test_root');
+    final vm = ViewModelImplementation();
+    var factoryCalls = 0;
+    scope.putLazyAs<ViewModelAbstraction, ViewModelImplementation>(() {
+      factoryCalls++;
+      return vm;
+    });
+
+    expect(scope.contains<ViewModelAbstraction>(), isTrue);
+    expect(scope.contains<ViewModelImplementation>(), isTrue);
+    expect(factoryCalls, 0);
+    expect(scope.find<ViewModelImplementation>(), same(vm));
+    expect(scope.find<ViewModelAbstraction>(), same(vm));
+    expect(factoryCalls, 1);
+    scope.close();
+  });
+
+  test('putLazyAs rejects an occupied implementation key', () {
+    final scope = DiScope.open('test_root');
+    var factoryCalls = 0;
+    scope.putLazyAs<ViewModelAbstraction, ViewModelImplementation>(() {
+      factoryCalls++;
+      return ViewModelImplementation();
+    });
+
+    expect(
+      () => scope.put<ViewModelImplementation>(ViewModelImplementation()),
+      throwsA(isA<DuplicateInstanceException>()),
+    );
+    expect(factoryCalls, 0);
+    scope.close();
+  });
+
+  test('replaceLazyAs replaces both explicit lazy keys', () {
+    final scope = DiScope.open('test_root');
+    var oldFactoryCalls = 0;
+    final replacement = ViewModelImplementation();
+    scope.putLazyAs<ViewModelAbstraction, ViewModelImplementation>(() {
+      oldFactoryCalls++;
+      return ViewModelImplementation();
+    });
+
+    scope.replaceLazyAs<ViewModelAbstraction, ViewModelImplementation>(
+      () => replacement,
+    );
+
+    expect(oldFactoryCalls, 0);
+    expect(scope.find<ViewModelAbstraction>(), same(replacement));
+    expect(scope.find<ViewModelImplementation>(), same(replacement));
+    scope.close();
+  });
+
+  test('find requires an explicitly registered abstraction key', () {
     final scope = DiScope.open('test_root');
     final vm = ViewModelImplementation();
     scope.put<ViewModelImplementation>(vm, registerRuntimeType: false);
+
+    expect(
+      () => scope.find<ViewModelAbstraction>(),
+      throwsA(isA<InstanceNotFoundException>()),
+    );
+    scope.close();
+  });
+
+  test('find resolves concrete alias registered with an abstraction', () {
+    final scope = DiScope.open('test_root');
+    final vm = ViewModelImplementation();
+    scope.put<ViewModelAbstraction>(vm);
 
     expect(scope.find<ViewModelAbstraction>(), same(vm));
+    expect(scope.find<ViewModelImplementation>(), same(vm));
     scope.close();
   });
 
-  test('find with exactTypeMatch does not resolve descendant', () {
-    final scope = DiScope.open('test_root');
-    final vm = ViewModelImplementation();
-    scope.put<ViewModelImplementation>(vm, registerRuntimeType: false);
-
-    expect(() => scope.find<ViewModelAbstraction>(exactTypeMatch: true),
-        throwsA(isA<InstanceNotFoundException>()));
-    scope.close();
-  });
-
-  test(
-      'find resolves intermediate abstraction from aliased runtime registration',
+  test('find does not infer intermediate abstractions from a concrete alias',
       () {
     final scope = DiScope.open('test_root');
     final repo = ImplementationC();
@@ -208,7 +298,21 @@ void main() {
 
     expect(scope.find<ContractA>(), same(repo));
     expect(scope.find<ImplementationC>(), same(repo));
-    expect(scope.find<ContractB>(), same(repo));
+    expect(
+      () => scope.find<ContractB>(),
+      throwsA(isA<InstanceNotFoundException>()),
+    );
+    scope.close();
+  });
+
+  test('concrete alias conflicts with an explicit concrete registration', () {
+    final scope = DiScope.open('test_root');
+    scope.put<ViewModelAbstraction>(ViewModelImplementation());
+
+    expect(
+      () => scope.put<ViewModelImplementation>(ViewModelImplementation()),
+      throwsA(isA<DuplicateInstanceException>()),
+    );
     scope.close();
   });
 
@@ -234,6 +338,77 @@ void main() {
     scope.close();
   });
 
+  test('instance-not-found reports the scope where lookup started', () {
+    final scope = DiScope.open('test_root');
+
+    expect(
+      () => scope.find<ViewModelAbstraction>(),
+      throwsA(
+        isA<InstanceNotFoundException>()
+            .having((error) => error.scope, 'scope', same(scope)),
+      ),
+    );
+    scope.close();
+  });
+
+  test('empty scope names are rejected', () {
+    expect(() => DiScope.open(''), throwsArgumentError);
+  });
+
+  test('closed scopes cannot be used as parents', () {
+    final parent = DiScope.open('test_root');
+    parent.close();
+
+    expect(
+      () => DiScope.open('child', knownParentScope: parent),
+      throwsStateError,
+    );
+  });
+
+  test('RootScope cannot be closed directly', () {
+    expect(RootScope.close, throwsArgumentError);
+  });
+
+  test('closed scopes cannot be reset', () {
+    final scope = DiScope.open('test_root');
+    scope.close();
+
+    expect(scope.reset, throwsStateError);
+  });
+
+  test('reset disposes registrations and closes child scopes', () {
+    final scope = DiScope.open('test_root');
+    final child = DiScope.open('child', knownParentScope: scope);
+    final localResource = DisposableResource();
+    final childResource = DisposableResource();
+    scope.put<DisposableResource>(
+      localResource,
+      onDispose: (resource) => resource.disposed = true,
+    );
+    child.put<DisposableResource>(
+      childResource,
+      onDispose: (resource) => resource.disposed = true,
+    );
+
+    scope.reset();
+
+    expect(localResource.disposed, isTrue);
+    expect(childResource.disposed, isTrue);
+    expect(scope.locateScope('child'), isNull);
+    expect(scope.contains<DisposableResource>(), isFalse);
+    expect(scope.put<int>(1), 1);
+    scope.close();
+  });
+
+  test('scope remains a valid hash set member after closing', () {
+    final scope = DiScope.open('test_root');
+    final scopes = <DiScope>{scope};
+
+    scope.close();
+
+    expect(scopes.contains(scope), isTrue);
+  });
+
   test('evict by abstraction removes implementation alias', () {
     final scope = DiScope.open('test_root');
     scope.put<ViewModelAbstraction>(ViewModelImplementation());
@@ -241,6 +416,19 @@ void main() {
 
     expect(() => scope.find<ViewModelImplementation>(),
         throwsA(isA<InstanceNotFoundException>()));
+    scope.close();
+  });
+
+  test('evict by concrete alias removes abstraction registration', () {
+    final scope = DiScope.open('test_root');
+    final vm = ViewModelImplementation();
+    scope.put<ViewModelAbstraction>(vm);
+
+    expect(scope.evict<ViewModelImplementation>(), same(vm));
+    expect(
+      () => scope.find<ViewModelAbstraction>(),
+      throwsA(isA<InstanceNotFoundException>()),
+    );
     scope.close();
   });
 
@@ -253,19 +441,18 @@ void main() {
     root.close();
   });
 
-  test('findInChildren uses tag and exactTypeMatch', () {
+  test('findInChildren requires an explicit type key', () {
     final root = DiScope.open('test_root');
     final child = DiScope.open('child', knownParentScope: root);
     final vm = ViewModelImplementation();
     child.put<ViewModelImplementation>(vm,
         tag: 'vm', registerRuntimeType: false);
 
-    expect(root.findInChildren<ViewModelAbstraction>(tag: 'vm'), same(vm));
     expect(
-      () => root.findInChildren<ViewModelAbstraction>(
-          tag: 'vm', exactTypeMatch: true),
+      () => root.findInChildren<ViewModelAbstraction>(tag: 'vm'),
       throwsA(isA<InstanceNotFoundException>()),
     );
+    expect(root.findInChildren<ViewModelImplementation>(tag: 'vm'), same(vm));
     root.close();
   });
 
@@ -423,6 +610,62 @@ void main() {
     DiScope.open('childB', knownParentScope: root);
     expect(() => root.close(), returnsNormally);
   });
+
+  test('close disposes remaining registrations after a disposer fails', () {
+    final scope = DiScope.open('test_root');
+    final second = DisposableResource();
+    scope.put<DisposableResource>(
+      DisposableResource(),
+      tag: 'first',
+      onDispose: (_) => throw StateError('first disposer failed'),
+    );
+    scope.put<DisposableResource>(
+      second,
+      tag: 'second',
+      onDispose: (resource) => resource.disposed = true,
+    );
+
+    expect(scope.close, throwsStateError);
+    expect(second.disposed, isTrue);
+    expect(() => scope.find<DisposableResource>(), throwsStateError);
+  });
+
+  test('close disposes sibling scopes after a child disposer fails', () {
+    final root = DiScope.open('test_root');
+    final failingChild = DiScope.open('failing_child', knownParentScope: root);
+    final sibling = DiScope.open('sibling', knownParentScope: root);
+    final rootResource = DisposableResource();
+    final siblingResource = DisposableResource();
+    root.put<DisposableResource>(
+      rootResource,
+      onDispose: (resource) => resource.disposed = true,
+    );
+    failingChild.put<DisposableResource>(
+      DisposableResource(),
+      onDispose: (_) => throw StateError('child disposer failed'),
+    );
+    sibling.put<DisposableResource>(
+      siblingResource,
+      onDispose: (resource) => resource.disposed = true,
+    );
+
+    expect(root.close, throwsStateError);
+    expect(rootResource.disposed, isTrue);
+    expect(siblingResource.disposed, isTrue);
+  });
+
+  test('DiElement diagnostics do not create lazy values', () {
+    var factoryCalls = 0;
+    final element = DiElement<ViewModelAbstraction>.lazy(
+      instancer: () {
+        factoryCalls++;
+        return ViewModelImplementation();
+      },
+    );
+
+    expect(element.toString(), contains('<lazy>'));
+    expect(factoryCalls, 0);
+  });
 }
 
 abstract interface class ViewModelAbstraction {}
@@ -434,3 +677,7 @@ abstract interface class ContractA {}
 abstract interface class ContractB implements ContractA {}
 
 class ImplementationC implements ContractB {}
+
+class DisposableResource {
+  bool disposed = false;
+}

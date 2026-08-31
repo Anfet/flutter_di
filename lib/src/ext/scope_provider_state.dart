@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:simple_service_locator/simple_service_locator.dart';
 
@@ -8,21 +7,27 @@ import 'package:simple_service_locator/simple_service_locator.dart';
 /// automatically closed in [dispose]. Override [injectDependencies] to
 /// register state-local dependencies before the widget starts building.
 ///
+/// Each owner must supply a globally unique [scopeName]. Override [parentScope]
+/// to attach the scope to an explicit parent instead of [RootScope].
+///
 /// If you override [injectDependencies], call `super.injectDependencies()` to
 /// ensure [scope] is initialized.
 mixin ScopeProviderState<T extends StatefulWidget> on State<T> {
-  /// Name of the scope opened for this state.
+  /// Globally unique name of the scope opened for this state.
+  String get scopeName;
+
+  /// Optional explicit parent scope.
   ///
-  /// Override to provide deterministic or custom naming.
-  String get scopeName => '${runtimeType}Scope';
+  /// When omitted, the scope is attached to [RootScope].
+  DiScope? get parentScope => null;
 
   /// Scope owned by this widget state.
   late final DiScope scope;
 
   @override
   void initState() {
-    injectDependencies();
     super.initState();
+    injectDependencies();
   }
 
   /// Registers dependencies required by the widget state.
@@ -30,12 +35,15 @@ mixin ScopeProviderState<T extends StatefulWidget> on State<T> {
   /// Called from [initState] before `super.initState()`.
   @mustCallSuper
   void injectDependencies() {
-    scope = DiScope.open(scopeName);
+    scope = DiScope.open(scopeName, knownParentScope: parentScope);
   }
 
   @override
   void dispose() {
-    scope.close();
-    super.dispose();
+    try {
+      scope.close();
+    } finally {
+      super.dispose();
+    }
   }
 }

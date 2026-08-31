@@ -1,3 +1,5 @@
+import 'dart:collection';
+
 import 'package:flutter/foundation.dart';
 import 'package:simple_service_locator/src/exceptions.dart';
 
@@ -21,7 +23,7 @@ class DiScope extends ChangeNotifier {
   /// A human-readable unique scope name within a root scope tree.
   final String name;
   late final DiScope? _parent;
-  final Map<Type, Map<String, DiElement>> _instances = {};
+  final Map<Type, Map<String, DiElement<Object?>>> _instances = {};
   final List<DiScope> _subScopes = [];
   bool _isClosed = false;
 
@@ -43,9 +45,13 @@ class DiScope extends ChangeNotifier {
     DiScope? knownParentScope,
     String? lookupParentScope,
   }) {
+    if (name.isEmpty) {
+      throw ArgumentError.value(name, 'name', 'scope name must not be empty');
+    }
     _parent = knownParentScope ??
         RootScope.locateScope(lookupParentScope) ??
         RootScope;
+    _parent!._assertOpen();
     final root = RootScope;
     if (root.locateScope(name) != null) {
       throw DuplicateScopeException(name, root);
@@ -94,18 +100,15 @@ class DiScope extends ChangeNotifier {
     return null;
   }
 
-  DiElement? _elementOf<T>(String? tag) => _instances[T]?[tag ?? ''];
+  DiElement<Object?>? _elementOf<T>(String? tag) => _instances[T]?[tag ?? ''];
 
-  DiElement? _elementOfType(Type type, String? tag) =>
+  DiElement<Object?>? _elementOfType(Type type, String? tag) =>
       _instances[type]?[tag ?? ''];
 
   /// Returns `true` when this scope has a registration for type `T`.
   ///
   /// This checks only the current scope, not ancestors.
-  bool contains<T>({String? tag}) {
-    final item = _elementOf<T>(tag);
-    return item != null && item.instance is T;
-  }
+  bool contains<T>({String? tag}) => _elementOf<T>(tag) != null;
 
   /// Returns `true` when this scope has a registration for [type].
   ///
@@ -134,13 +137,11 @@ class DiScope extends ChangeNotifier {
   /// Alias for [find].
   T call<T>({
     String? tag,
-    bool exactTypeMatch = false,
     bool searchDescendants = false,
     T Function(Iterable<T> children)? onMany,
   }) =>
       find<T>(
         tag: tag,
-        exactTypeMatch: exactTypeMatch,
         searchDescendants: searchDescendants,
         onMany: onMany,
       );
@@ -149,35 +150,34 @@ class DiScope extends ChangeNotifier {
   ///
   /// Lookup order:
   /// 1. Local registration by exact key `T`.
-  /// 2. Local descendant registration where runtime type is assignable to `T`
-  ///    (skipped when [exactTypeMatch] is `true`).
-  /// 3. Parent scopes recursively.
-  /// 4. Child scopes when [searchDescendants] is `true`.
+  /// 2. Parent scopes recursively.
+  /// 3. Child scopes when [searchDescendants] is `true`.
+  ///
+  /// A direct registration using [put] creates keys for both its declared type
+  /// and, by default, its concrete runtime type. No other assignable types are
+  /// inferred during lookup.
   ///
   /// Throws [InstanceNotFoundException] when resolution fails.
   T find<T>({
     String? tag,
-    bool exactTypeMatch = false,
     bool searchDescendants = false,
     T Function(Iterable<T> children)? onMany,
   }) {
     _assertOpen();
 
-    final local = _findLocal<T>(tag: tag, exactTypeMatch: exactTypeMatch);
+    final local = _findLocal<T>(tag: tag);
     if (local != null) {
       return local;
     }
 
-    InstanceNotFoundException? parentMiss;
     T? parent;
     try {
       parent = _parent?.find<T>(
         tag: tag,
-        exactTypeMatch: exactTypeMatch,
         searchDescendants: false,
       );
-    } on InstanceNotFoundException catch (ex) {
-      parentMiss = ex;
+    } on InstanceNotFoundException {
+      // A parent miss is reported from the scope where this lookup started.
     }
     if (parent != null) {
       return parent;
@@ -187,18 +187,11 @@ class DiScope extends ChangeNotifier {
       try {
         return findInChildren<T>(
           tag: tag,
-          exactTypeMatch: exactTypeMatch,
           onMany: onMany,
         );
       } on InstanceNotFoundException {
-        if (parentMiss != null) {
-          throw parentMiss;
-        }
+        // No child match; report the miss from this scope below.
       }
-    }
-
-    if (parentMiss != null) {
-      throw parentMiss;
     }
 
     throw InstanceNotFoundException(T, this, tag: tag);
@@ -213,21 +206,19 @@ class DiScope extends ChangeNotifier {
   /// - [MultipleInstancesFoundException] when more than one descendant matches.
   T findInChildren<T>({
     String? tag,
-    bool exactTypeMatch = false,
     T Function(Iterable<T> children)? onMany,
   }) {
     _assertOpen();
     final matches = <_ScopedMatch<T>>[];
     final visited = <DiScope>{this};
-    final queue = List<DiScope>.from(_subScopes);
+    final queue = Queue<DiScope>.of(_subScopes);
     while (queue.isNotEmpty) {
-      final scope = queue.removeAt(0);
+      final scope = queue.removeFirst();
       if (!visited.add(scope)) {
         continue;
       }
 
-      final value =
-          scope._findLocal<T>(tag: tag, exactTypeMatch: exactTypeMatch);
+      final value = scope._findLocal<T>(tag: tag);
       if (value != null) {
         matches.add(_ScopedMatch(scope: scope, value: value));
       }
@@ -252,18 +243,18 @@ class DiScope extends ChangeNotifier {
     return matches.first.value;
   }
 
-  /// Finds descendant scopes containing a registration matching `T` and [tag].
+  /// Finds descendant scopes containing an explicit registration for `T` and
+  /// [tag].
   ///
   /// Set [includeSelf] to include the current scope in the search.
   List<DiScope> locateScopes<T>({
     String? tag,
-    bool exactTypeMatch = false,
     bool includeSelf = true,
   }) {
     _assertOpen();
     final result = <DiScope>[];
     final visited = <DiScope>{};
-    final queue = <DiScope>[];
+    final queue = Queue<DiScope>();
     if (includeSelf) {
       queue.add(this);
     } else {
@@ -271,13 +262,12 @@ class DiScope extends ChangeNotifier {
     }
 
     while (queue.isNotEmpty) {
-      final scope = queue.removeAt(0);
+      final scope = queue.removeFirst();
       if (!visited.add(scope)) {
         continue;
       }
 
-      if (scope._findLocal<T>(tag: tag, exactTypeMatch: exactTypeMatch) !=
-          null) {
+      if (scope._findLocal<T>(tag: tag) != null) {
         result.add(scope);
       }
       queue.addAll(scope._subScopes);
@@ -293,7 +283,7 @@ class DiScope extends ChangeNotifier {
     _assertOpen();
     final result = <DiScope>[];
     final visited = <DiScope>{};
-    final queue = <DiScope>[];
+    final queue = Queue<DiScope>();
     if (includeSelf) {
       queue.add(this);
     } else {
@@ -301,7 +291,7 @@ class DiScope extends ChangeNotifier {
     }
 
     while (queue.isNotEmpty) {
-      final scope = queue.removeAt(0);
+      final scope = queue.removeFirst();
       if (!visited.add(scope)) {
         continue;
       }
@@ -315,43 +305,9 @@ class DiScope extends ChangeNotifier {
     return result;
   }
 
-  T? _findLocal<T>({String? tag, required bool exactTypeMatch}) {
-    final element = _elementOf<T>(tag);
-    if (element != null && element.instance is T) {
-      return element.instance as T;
-    }
-
-    if (!exactTypeMatch) {
-      return _findDescendant<T>(tag);
-    }
-
-    return null;
-  }
-
-  T? _findDescendant<T>(String? tag) {
-    final tagKey = tag ?? '';
-    final checked = Set<DiElement>.identity();
-    for (final entry in _instances.entries) {
-      final item = entry.value[tagKey];
-      if (item == null) {
-        continue;
-      }
-
-      // Consider only concrete runtime registrations when resolving descendants.
-      if (entry.key != item.instance.runtimeType) {
-        continue;
-      }
-
-      if (!checked.add(item)) {
-        continue;
-      }
-
-      if (item.instance is T) {
-        return item.instance as T;
-      }
-    }
-
-    return null;
+  T? _findLocal<T>({String? tag}) {
+    final instance = _elementOf<T>(tag)?.instance;
+    return instance is T ? instance : null;
   }
 
   bool _containsTag(String tag) {
@@ -376,7 +332,7 @@ class DiScope extends ChangeNotifier {
   }) {
     _assertOpen();
     if (contains<T>(tag: tag)) {
-      _evict<T>(tag: tag);
+      _remove<T>(tag: tag).dispose();
     }
 
     return _put<T>(
@@ -396,10 +352,30 @@ class DiScope extends ChangeNotifier {
       {String? tag, DisposeCallback<T>? onDispose}) {
     _assertOpen();
     if (contains<T>(tag: tag)) {
-      _evict<T>(tag: tag);
+      _remove<T>(tag: tag).dispose();
     }
 
     _putLazy<T>(instancer, tag: tag, onDispose: onDispose);
+    notifyListeners();
+  }
+
+  /// Replaces a lazy registration while keeping both declared and implementation
+  /// type keys available for lookup.
+  void replaceLazyAs<T, TImplementation extends T>(
+    ValueGetter<TImplementation> instancer, {
+    String? tag,
+    DisposeCallback<TImplementation>? onDispose,
+  }) {
+    _assertOpen();
+    if (contains<T>(tag: tag)) {
+      _remove<T>(tag: tag).dispose();
+    }
+    _assertLazyImplementationKeyAvailable<T, TImplementation>(tag: tag);
+    _putLazyAs<T, TImplementation>(
+      instancer,
+      tag: tag,
+      onDispose: onDispose,
+    );
     notifyListeners();
   }
 
@@ -423,6 +399,34 @@ class DiScope extends ChangeNotifier {
     }
 
     _putLazy<T>(instancer, tag: tag, onDispose: onDispose);
+    notifyListeners();
+  }
+
+  /// Registers a lazy instance under both `T` and [TImplementation].
+  ///
+  /// This makes both explicit keys available without materializing the factory.
+  /// Throws [DuplicateInstanceException] when either key is already registered
+  /// in this scope for the same [tag].
+  void putLazyAs<T, TImplementation extends T>(
+    ValueGetter<TImplementation> instancer, {
+    String? tag,
+    DisposeCallback<TImplementation>? onDispose,
+  }) {
+    _assertOpen();
+    if (contains<T>(tag: tag)) {
+      throw DuplicateInstanceException(
+        T,
+        this,
+        instanceType: TImplementation,
+        tag: tag,
+      );
+    }
+    _assertLazyImplementationKeyAvailable<T, TImplementation>(tag: tag);
+    _putLazyAs<T, TImplementation>(
+      instancer,
+      tag: tag,
+      onDispose: onDispose,
+    );
     notifyListeners();
   }
 
@@ -478,12 +482,18 @@ class DiScope extends ChangeNotifier {
       );
     }
 
-    final item =
-        DiElement<T>.direct(item: instance, tag: tag, onDispose: onDispose);
-    _instances.putIfAbsent(T, () => <String, DiElement>{})[tagKey] = item;
+    final item = DiElement<Object?>.direct(
+      item: instance,
+      tag: tag,
+      onDispose: onDispose == null ? null : (value) => onDispose(value as T),
+    );
+    _instances.putIfAbsent(T, () => <String, DiElement<Object?>>{})[tagKey] =
+        item;
     if (registerRuntimeType && runtimeType != T) {
-      _instances.putIfAbsent(runtimeType, () => <String, DiElement>{})[tagKey] =
-          item;
+      _instances.putIfAbsent(
+        runtimeType,
+        () => <String, DiElement<Object?>>{},
+      )[tagKey] = item;
     }
     if (notify) {
       notifyListeners();
@@ -496,45 +506,81 @@ class DiScope extends ChangeNotifier {
     String? tag,
     DisposeCallback<T>? onDispose,
   }) {
-    var map = _instances.putIfAbsent(T, () => <String, DiElement<T>>{});
-    map[tag ?? ''] =
-        DiElement<T>.lazy(instancer: instancer, tag: tag, onDispose: onDispose);
+    final map = _instances.putIfAbsent(T, () => <String, DiElement<Object?>>{});
+    map[tag ?? ''] = DiElement<Object?>.lazy(
+      instancer: instancer,
+      tag: tag,
+      onDispose: onDispose == null ? null : (value) => onDispose(value as T),
+    );
   }
 
-  /// Clears all instances and child scopes without disposing anything.
+  void _assertLazyImplementationKeyAvailable<T, TImplementation extends T>({
+    String? tag,
+  }) {
+    if (TImplementation != T && containsType(TImplementation, tag: tag)) {
+      throw DuplicateInstanceException(
+        TImplementation,
+        this,
+        instanceType: TImplementation,
+        tag: tag,
+      );
+    }
+  }
+
+  void _putLazyAs<T, TImplementation extends T>(
+    ValueGetter<TImplementation> instancer, {
+    String? tag,
+    DisposeCallback<TImplementation>? onDispose,
+  }) {
+    final item = DiElement<Object?>.lazy(
+      instancer: instancer,
+      tag: tag,
+      onDispose: onDispose == null
+          ? null
+          : (value) => onDispose(value as TImplementation),
+    );
+    final tagKey = tag ?? '';
+    _instances.putIfAbsent(T, () => <String, DiElement<Object?>>{})[tagKey] =
+        item;
+    if (TImplementation != T) {
+      _instances.putIfAbsent(
+        TImplementation,
+        () => <String, DiElement<Object?>>{},
+      )[tagKey] = item;
+    }
+  }
+
+  /// Disposes local registrations and closes all child scopes.
   ///
-  /// Intended for tests and diagnostics.
+  /// This scope remains open and can be reused after the reset. Intended for
+  /// tests and diagnostics.
   void reset() {
-    _isClosed = false;
-    _instances.clear();
-    _subScopes.clear();
-    notifyListeners();
+    _assertOpen();
+    final failures = _FailureCollector();
+    _disposeContents(failures);
+    failures.run(notifyListeners);
+    failures.rethrowIfPresent();
   }
 
   /// Closes this scope, all descendants, and disposes owned instances.
   ///
   /// Safe to call multiple times.
   void close() {
-    if (!_isClosed) {
-      _isClosed = true;
-      _parent?._subScopes.remove(this);
-      _parent?.notifyListeners();
-
-      for (var s in List<DiScope>.from(_subScopes)) {
-        s.close();
-      }
-
-      final items = Set<DiElement>.identity()
-        ..addAll(_instances.values.expand((element) => element.values));
-      for (var item in items) {
-        item.dispose();
-      }
-
-      _instances.clear();
-      _subScopes.clear();
-      notifyListeners();
-      super.dispose();
+    if (identical(this, RootScope)) {
+      throw ArgumentError('cannot close root scope');
     }
+    if (_isClosed) {
+      return;
+    }
+
+    _isClosed = true;
+    final failures = _FailureCollector();
+    _parent?._subScopes.remove(this);
+    failures.run(() => _parent?.notifyListeners());
+    _disposeContents(failures);
+    failures.run(notifyListeners);
+    super.dispose();
+    failures.rethrowIfPresent();
   }
 
   /// Removes and returns a local instance registered for type `T`.
@@ -551,8 +597,15 @@ class DiScope extends ChangeNotifier {
   }
 
   T _evict<T>({String? tag}) {
+    final item = _remove<T>(tag: tag);
+    final value = item.instance;
+    item.onDispose?.call(value);
+    return value as T;
+  }
+
+  DiElement<Object?> _remove<T>({String? tag}) {
     final tagKey = tag ?? '';
-    final item = _instances[T]?[tagKey] as DiElement<T>?;
+    final item = _instances[T]?[tagKey];
     if (item == null) {
       throw InstanceNotFoundException(T, this, tag: tag);
     }
@@ -568,8 +621,22 @@ class DiScope extends ChangeNotifier {
       _instances.remove(type);
     }
 
-    item.onDispose?.call(item.instance);
-    return item.instance;
+    return item;
+  }
+
+  void _disposeContents(_FailureCollector failures) {
+    for (final scope in List<DiScope>.from(_subScopes)) {
+      failures.run(scope.close);
+    }
+
+    final items = Set<DiElement<Object?>>.identity()
+      ..addAll(_instances.values.expand((element) => element.values));
+    for (final item in items) {
+      failures.run(item.dispose);
+    }
+
+    _instances.clear();
+    _subScopes.clear();
   }
 
   void _assertOpen() {
@@ -583,25 +650,6 @@ class DiScope extends ChangeNotifier {
     return 'DiScope{name: $name, _parent: $_parent, _instances: $_instances, _subScopes: $_subScopes, _isClosed: $_isClosed}';
   }
 
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is DiScope &&
-          runtimeType == other.runtimeType &&
-          name == other.name &&
-          _parent == other._parent &&
-          _instances == other._instances &&
-          _subScopes == other._subScopes &&
-          _isClosed == other._isClosed;
-
-  @override
-  int get hashCode =>
-      name.hashCode ^
-      _parent.hashCode ^
-      _instances.hashCode ^
-      _subScopes.hashCode ^
-      _isClosed.hashCode;
-
   /// Prints a human-readable tree of scopes and instances using [debugPrint].
   ///
   /// Set [verboseInstances] to `false` to print only scope names.
@@ -614,7 +662,8 @@ class DiScope extends ChangeNotifier {
   }) {
     final shouldPrintInstances = verboseInstances ?? verboseInstaces;
     var tabs = offset ?? '';
-    var items = _instances.values.expand((element) => element.values);
+    final items = Set<DiElement<Object?>>.identity()
+      ..addAll(_instances.values.expand((element) => element.values));
     debugPrint("$tabs$name");
     if (shouldPrintInstances) {
       tabs += '\t';
@@ -628,7 +677,7 @@ class DiScope extends ChangeNotifier {
     }
 
     for (var s in _subScopes) {
-      s.verboseTree(verboseInstaces: verboseInstaces, offset: tabs);
+      s.verboseTree(verboseInstaces: shouldPrintInstances, offset: tabs);
     }
   }
 }
@@ -638,6 +687,28 @@ class _ScopedMatch<T> {
   final T value;
 
   _ScopedMatch({required this.scope, required this.value});
+}
+
+class _FailureCollector {
+  Object? _error;
+  StackTrace? _stackTrace;
+
+  void run(void Function() action) {
+    try {
+      action();
+    } catch (error, stackTrace) {
+      _error ??= error;
+      _stackTrace ??= stackTrace;
+    }
+  }
+
+  void rethrowIfPresent() {
+    final error = _error;
+    final stackTrace = _stackTrace;
+    if (error != null && stackTrace != null) {
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+  }
 }
 
 /// A wrapper around a direct or lazily created scoped instance.
@@ -690,18 +761,6 @@ class DiElement<T> {
 
   @override
   String toString() {
-    return 'DiElement{instance: $instance, tag: $tag, onDispose: $onDispose}';
+    return 'DiElement{instance: ${_instance ?? '<lazy>'}, tag: $tag, onDispose: $onDispose}';
   }
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is DiElement &&
-          runtimeType == other.runtimeType &&
-          instance == other.instance &&
-          tag == other.tag &&
-          onDispose == other.onDispose;
-
-  @override
-  int get hashCode => instance.hashCode ^ tag.hashCode ^ onDispose.hashCode;
 }

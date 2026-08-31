@@ -7,7 +7,7 @@ void main() {
     RootScope.reset();
   });
 
-  testWidgets('ScopedWidgetState opens scope using overridable scopeName',
+  testWidgets('ScopeProviderState opens scope using an explicit scopeName',
       (tester) async {
     final key = GlobalKey<_NamedScopeState>();
 
@@ -21,7 +21,7 @@ void main() {
     expect(RootScope.locateScope('test_widget_scope'), isNotNull);
   });
 
-  testWidgets('ScopedWidgetState closes owned scope on dispose',
+  testWidgets('ScopeProviderState closes owned scope on dispose',
       (tester) async {
     final key = GlobalKey<_NamedScopeState>();
 
@@ -35,37 +35,20 @@ void main() {
     expect(RootScope.locateScope('test_widget_scope'), isNull);
   });
 
-  testWidgets('ScopeConsumerState resolves scope opened by ScopeProviderState',
+  testWidgets('ScopeProviderState attaches to an explicit parent scope',
       (tester) async {
-    final providerKey = GlobalKey<_NamedScopeState>();
-    final consumerKey = GlobalKey<_NamedScopeConsumerState>();
+    final parent = DiScope.open('parent_scope');
+    parent.put<int>(7);
+    final childKey = GlobalKey<_ChildScopeState>();
 
     await tester.pumpWidget(Directionality(
       textDirection: TextDirection.ltr,
-      child: Column(
-        children: [
-          _NamedScopeWidget(key: providerKey),
-          _NamedScopeConsumerWidget(key: consumerKey),
-        ],
-      ),
+      child: _ChildScopeWidget(parentScope: parent, key: childKey),
     ));
 
-    final providerState = providerKey.currentState!;
-    final consumerState = consumerKey.currentState!;
-
-    expect(consumerState.scope, same(providerState.scope));
-    expect(consumerState.scope.find<int>(), 42);
-  });
-
-  testWidgets('ScopeConsumerState throws when scope is absent', (tester) async {
-    final key = GlobalKey<_NamedScopeConsumerState>();
-
-    await tester.pumpWidget(Directionality(
-      textDirection: TextDirection.ltr,
-      child: _NamedScopeConsumerWidget(key: key),
-    ));
-
-    expect(() => key.currentState!.scope, throwsA(isA<StateError>()));
+    expect(childKey.currentState!.scope.find<int>(), 7);
+    await tester.pumpWidget(const SizedBox.shrink());
+    parent.close();
   });
 }
 
@@ -93,17 +76,22 @@ class _NamedScopeState extends State<_NamedScopeWidget>
   }
 }
 
-class _NamedScopeConsumerWidget extends StatefulWidget {
-  const _NamedScopeConsumerWidget({super.key});
+class _ChildScopeWidget extends StatefulWidget {
+  const _ChildScopeWidget({required this.parentScope, super.key});
+
+  final DiScope parentScope;
 
   @override
-  State<_NamedScopeConsumerWidget> createState() => _NamedScopeConsumerState();
+  State<_ChildScopeWidget> createState() => _ChildScopeState();
 }
 
-class _NamedScopeConsumerState extends State<_NamedScopeConsumerWidget>
-    with ScopeConsumerState<_NamedScopeConsumerWidget> {
+class _ChildScopeState extends State<_ChildScopeWidget>
+    with ScopeProviderState<_ChildScopeWidget> {
   @override
-  String get scopeName => 'test_widget_scope';
+  String get scopeName => 'child_widget_scope';
+
+  @override
+  DiScope get parentScope => widget.parentScope;
 
   @override
   Widget build(BuildContext context) {

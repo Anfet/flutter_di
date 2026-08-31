@@ -20,7 +20,7 @@ Useful when you need:
 ## Features
 
 - Register direct instances: `put<T>()`, `replace<T>()`
-- Register lazy instances: `putLazy<T>()`, `replaceLazy<T>()`
+- Register lazy instances: `putLazy<T>()`, `replaceLazy<T>()`, `putLazyAs<A, B>()`, `replaceLazyAs<A, B>()`
 - Resolve dependencies: `find<T>()` or `scope<T>()`
 - Resolve in descendants only: `findInChildren<T>()`
 - Support abstraction + implementation lookup for same object
@@ -29,13 +29,13 @@ Useful when you need:
 - Scope tree lookup by name (`locateScope`)
 - Scope lookup by registration/type tag (`locateScopes`, `locateScopesByTag`)
 - Listen for scope changes with `addListener()`
-- Widget helper mixins (`ScopeProviderState`, `ScopeConsumerState`)
+- Widget scope lifecycle mixin (`ScopeProviderState`)
 
 ## Getting Started
 
 ```yaml
 dependencies:
-  simple_service_locator: ^0.1.0
+  simple_service_locator: ^0.2.0
 ```
 
 ## Quick Usage
@@ -104,13 +104,27 @@ RootScope.putLazy<ExpensiveService>(() => ExpensiveService());
 final service = RootScope.find<ExpensiveService>(); // created on first access
 ```
 
+For an abstraction and implementation pair, use explicit lazy keys:
+
+```dart
+RootScope.putLazyAs<UserRepository, UserRepositoryFirebase>(
+  () => UserRepositoryFirebase(),
+);
+final byAbstraction = RootScope.find<UserRepository>();
+final byImplementation = RootScope.find<UserRepositoryFirebase>();
+```
+
+Registration checks, replacements, diagnostics, and closing an unused lazy
+registration do not invoke its factory.
+
 ## Lookup Behavior
 
-- `find<T>()` (default `exactTypeMatch: false`) can resolve descendants by runtime type.
-- `find<T>(exactTypeMatch: true)` restricts lookup to exact registered type keys.
+- `find<T>()` resolves explicit registration keys only; it does not infer supertypes or interfaces from an instance's runtime type.
 - `find<T>(searchDescendants: true, onMany: ...)` also searches child scopes.
 - `findInChildren<T>(onMany: ...)` searches only child scopes; without `onMany` it throws `MultipleInstancesFoundException` on ambiguous matches.
-- `put<T>(instance)` registers under `T`, and by default also under `instance.runtimeType`.
+- `put<A>(B())` registers the same instance under both `A` and `B` by default, so either key can resolve it.
+- `put<B>(B())` registers only `B`; resolving an interface or superclass requires registering that type explicitly.
+- `putLazyAs<A, B>(() => B())` lazily registers both explicit keys. `putLazy<A>()` registers only `A`.
 - Set `registerRuntimeType: false` to disable runtime-type alias registration.
 
 ## Advanced Scope Queries
@@ -127,12 +141,15 @@ final prodOnlyScopes = root.locateScopes<ApiClient>(tag: 'prod');
 final taggedScopes = root.locateScopesByTag('mock');
 ```
 
-## Flutter Widget Scope Helper
+## Flutter Scope Lifecycle Helper
 
 ```dart
 class ProfilePageState extends State<ProfilePage> with ScopeProviderState<ProfilePage> {
   @override
-  String get scopeName => 'profile_scope';
+  String get scopeName => 'profile:${widget.profileId}';
+
+  @override
+  DiScope get parentScope => RootScope;
 
   @override
   void injectDependencies() {
@@ -141,6 +158,10 @@ class ProfilePageState extends State<ProfilePage> with ScopeProviderState<Profil
   }
 }
 ```
+
+`ScopeProviderState` is context-less: pass a [DiScope] explicitly through a
+constructor or use a known globally unique scope name when another object must
+access it. There is no widget consumer lookup helper.
 
 ## Cases That Fit Pub.dev Consumers Well
 
@@ -154,3 +175,6 @@ class ProfilePageState extends State<ProfilePage> with ScopeProviderState<Profil
 
 - If an instance is missing, `InstanceNotFoundException` includes requested type, scope, and tag.
 - Closing a scope disposes registered instances once, even when they were registered under multiple type aliases.
+- If a disposal callback throws, the scope still closes and disposes remaining registrations before rethrowing the first error.
+- Scope names must be non-empty.
+- `RootScope` is process-lifetime and cannot be closed. `reset()` closes child scopes and disposes registrations while keeping the current scope reusable.
