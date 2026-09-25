@@ -5,6 +5,7 @@
 /// - [DiElement] describing a single direct or lazy registration.
 /// - typed exceptions describing dependency lookup/registration errors.
 /// - [ScopeProviderState] for widget-bound scope lifecycle management.
+// ignore: unnecessary_library_name
 library simple_service_locator;
 
 export 'src/di_element.dart';

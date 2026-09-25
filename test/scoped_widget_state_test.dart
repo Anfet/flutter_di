@@ -7,44 +7,53 @@ void main() {
     RootScope.reset();
   });
 
-  testWidgets('ScopeProviderState opens scope using an explicit scopeName',
-      (tester) async {
+  testWidgets('ScopeProviderState opens scope using an explicit scopeName', (
+    tester,
+  ) async {
     final key = GlobalKey<_NamedScopeState>();
 
-    await tester.pumpWidget(Directionality(
-      textDirection: TextDirection.ltr,
-      child: _NamedScopeWidget(key: key),
-    ));
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: _NamedScopeWidget(key: key),
+      ),
+    );
 
     final state = key.currentState!;
     expect(state.scope.name, 'test_widget_scope');
     expect(RootScope.locateScope('test_widget_scope'), isNotNull);
   });
 
-  testWidgets('ScopeProviderState closes owned scope on dispose',
-      (tester) async {
+  testWidgets('ScopeProviderState closes owned scope on dispose', (
+    tester,
+  ) async {
     final key = GlobalKey<_NamedScopeState>();
 
-    await tester.pumpWidget(Directionality(
-      textDirection: TextDirection.ltr,
-      child: _NamedScopeWidget(key: key),
-    ));
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: _NamedScopeWidget(key: key),
+      ),
+    );
     expect(RootScope.locateScope('test_widget_scope'), isNotNull);
 
     await tester.pumpWidget(const SizedBox.shrink());
     expect(RootScope.locateScope('test_widget_scope'), isNull);
   });
 
-  testWidgets('ScopeProviderState attaches to an explicit parent scope',
-      (tester) async {
+  testWidgets('ScopeProviderState attaches to an explicit parent scope', (
+    tester,
+  ) async {
     final parent = DiScope.open('parent_scope');
     parent.put<int>(7);
     final childKey = GlobalKey<_ChildScopeState>();
 
-    await tester.pumpWidget(Directionality(
-      textDirection: TextDirection.ltr,
-      child: _ChildScopeWidget(parentScope: parent, key: childKey),
-    ));
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: _ChildScopeWidget(parentScope: parent, key: childKey),
+      ),
+    );
 
     expect(childKey.currentState!.scope.find<int>(), 7);
     await tester.pumpWidget(const SizedBox.shrink());

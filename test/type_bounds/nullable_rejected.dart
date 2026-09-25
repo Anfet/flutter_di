@@ -1,13 +1,7 @@
-// Static fixture: nullable registration keys must not compile.
+// Positive compile fixture: non-nullable registration and lookup keys compile.
 //
-// This file is intentionally NOT a runtime test. It documents the
-// `T extends Object` bound on the registration and lookup APIs by listing the
-// calls that the analyzer rejects. Each `expected_error` comment names the
-// diagnostic that `dart analyze` reports when the corresponding line is
-// uncommented.
-//
-// To verify the bound, uncomment any line below and run `flutter analyze`;
-// it must fail with `type_argument_not_matching_bounds`.
+// `type_bounds_test.dart` compiles the corresponding nullable calls as
+// subprocesses and verifies that each one is rejected.
 
 // ignore_for_file: unused_local_variable
 

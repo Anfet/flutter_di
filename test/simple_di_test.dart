@@ -118,10 +118,7 @@ void main() {
 
   test('evict with dispose', () {
     const a = 1;
-    RootScope.replace<int>(
-      a,
-      onDispose: (p0) {},
-    );
+    RootScope.replace<int>(a, onDispose: (p0) {});
     const b = 2;
     RootScope.replace<int>(b, onDispose: (p0) {});
     expect(RootScope.find<int>(), b);
@@ -164,8 +161,10 @@ void main() {
     scope.put<ViewModelAbstraction>(vm, registerRuntimeType: false);
 
     expect(scope.find<ViewModelAbstraction>(), same(vm));
-    expect(() => scope.find<ViewModelImplementation>(),
-        throwsA(isA<InstanceNotFoundException>()));
+    expect(
+      () => scope.find<ViewModelImplementation>(),
+      throwsA(isA<InstanceNotFoundException>()),
+    );
     scope.close();
   });
 
@@ -175,8 +174,10 @@ void main() {
     scope.replace<ViewModelAbstraction>(vm, registerRuntimeType: false);
 
     expect(scope.find<ViewModelAbstraction>(), same(vm));
-    expect(() => scope.find<ViewModelImplementation>(),
-        throwsA(isA<InstanceNotFoundException>()));
+    expect(
+      () => scope.find<ViewModelImplementation>(),
+      throwsA(isA<InstanceNotFoundException>()),
+    );
     scope.close();
   });
 
@@ -198,13 +199,10 @@ void main() {
     final scope = DiScope.open('test_root');
     var factoryCalls = 0;
     var disposed = false;
-    scope.putLazy<ViewModelAbstraction>(
-      () {
-        factoryCalls++;
-        return ViewModelImplementation();
-      },
-      onDispose: (_) => disposed = true,
-    );
+    scope.putLazy<ViewModelAbstraction>(() {
+      factoryCalls++;
+      return ViewModelImplementation();
+    }, onDispose: (_) => disposed = true);
     final replacement = ViewModelImplementation();
 
     scope.replaceLazy<ViewModelAbstraction>(() => replacement);
@@ -290,20 +288,22 @@ void main() {
     scope.close();
   });
 
-  test('find does not infer intermediate abstractions from a concrete alias',
-      () {
-    final scope = DiScope.open('test_root');
-    final repo = ImplementationC();
-    scope.put<ContractA>(repo);
+  test(
+    'find does not infer intermediate abstractions from a concrete alias',
+    () {
+      final scope = DiScope.open('test_root');
+      final repo = ImplementationC();
+      scope.put<ContractA>(repo);
 
-    expect(scope.find<ContractA>(), same(repo));
-    expect(scope.find<ImplementationC>(), same(repo));
-    expect(
-      () => scope.find<ContractB>(),
-      throwsA(isA<InstanceNotFoundException>()),
-    );
-    scope.close();
-  });
+      expect(scope.find<ContractA>(), same(repo));
+      expect(scope.find<ImplementationC>(), same(repo));
+      expect(
+        () => scope.find<ContractB>(),
+        throwsA(isA<InstanceNotFoundException>()),
+      );
+      scope.close();
+    },
+  );
 
   test('concrete alias conflicts with an explicit concrete registration', () {
     final scope = DiScope.open('test_root');
@@ -344,8 +344,11 @@ void main() {
     expect(
       () => scope.find<ViewModelAbstraction>(),
       throwsA(
-        isA<InstanceNotFoundException>()
-            .having((error) => error.scope, 'scope', same(scope)),
+        isA<InstanceNotFoundException>().having(
+          (error) => error.scope,
+          'scope',
+          same(scope),
+        ),
       ),
     );
     scope.close();
@@ -414,8 +417,10 @@ void main() {
     scope.put<ViewModelAbstraction>(ViewModelImplementation());
     scope.evict<ViewModelAbstraction>();
 
-    expect(() => scope.find<ViewModelImplementation>(),
-        throwsA(isA<InstanceNotFoundException>()));
+    expect(
+      () => scope.find<ViewModelImplementation>(),
+      throwsA(isA<InstanceNotFoundException>()),
+    );
     scope.close();
   });
 
@@ -445,8 +450,11 @@ void main() {
     final root = DiScope.open('test_root');
     final child = DiScope.open('child', knownParentScope: root);
     final vm = ViewModelImplementation();
-    child.put<ViewModelImplementation>(vm,
-        tag: 'vm', registerRuntimeType: false);
+    child.put<ViewModelImplementation>(
+      vm,
+      tag: 'vm',
+      registerRuntimeType: false,
+    );
 
     expect(
       () => root.findInChildren<ViewModelAbstraction>(tag: 'vm'),
@@ -558,22 +566,24 @@ void main() {
     root.close();
   });
 
-  test('find searchDescendants can resolve multiple child matches via onMany',
-      () {
-    final root = DiScope.open('test_root');
-    final childA = DiScope.open('childA', knownParentScope: root);
-    final childB = DiScope.open('childB', knownParentScope: root);
-    childA.put<int>(1);
-    childB.put<int>(2);
+  test(
+    'find searchDescendants can resolve multiple child matches via onMany',
+    () {
+      final root = DiScope.open('test_root');
+      final childA = DiScope.open('childA', knownParentScope: root);
+      final childB = DiScope.open('childB', knownParentScope: root);
+      childA.put<int>(1);
+      childB.put<int>(2);
 
-    final resolved = root.find<int>(
-      searchDescendants: true,
-      onMany: (children) => children.first,
-    );
+      final resolved = root.find<int>(
+        searchDescendants: true,
+        onMany: (children) => children.first,
+      );
 
-    expect(resolved, 1);
-    root.close();
-  });
+      expect(resolved, 1);
+      root.close();
+    },
+  );
 
   test('locateScopes finds scopes by type and tag', () {
     final root = DiScope.open('test_root');
@@ -587,8 +597,11 @@ void main() {
     final byTag = root.locateScopesByTag('shared');
 
     expect(byType.map((s) => s.name).toList(), ['test_root', 'childA']);
-    expect(
-        byTag.map((s) => s.name).toList(), ['test_root', 'childA', 'childB']);
+    expect(byTag.map((s) => s.name).toList(), [
+      'test_root',
+      'childA',
+      'childB',
+    ]);
     root.close();
   });
 

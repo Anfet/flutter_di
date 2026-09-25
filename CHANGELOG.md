@@ -1,3 +1,31 @@
+## 0.4.0
+
+### Breaking Changes
+
+- Minimum supported versions are Flutter 3.38.0 and Dart 3.10.0. Consumers
+  using an older Flutter or Dart SDK can no longer resolve this package.
+
+### Fixed
+
+- Ambiguous descendant lookup now checks registered keys before materializing
+  lazy values. For multiple matches, `onMany` receives values materialized in
+  breadth-first tree order; a single match is returned directly.
+- `ScopeProviderState` completes Flutter's deactivate/activate lifecycle when
+  `onDispose` throws while closing a scope. The error is reported after the
+  frame with its original stack trace.
+- Reentrant scope mutations coalesce into one deferred listener notification
+  after the current dispatch. Mutations during that follow-up are applied but
+  do not queue another notification, so one synchronous dispatch is bounded to
+  two listener invocations. Closing the scope cancels a pending notification.
+- `replace()`, `replaceLazy()`, and `replaceLazyAs()` install the replacement
+  after a disposal failure when its keys remain free, then rethrow the original
+  disposal error with its original stack trace. If the callback registers a
+  key required by the replacement and leaves the scope open, that registration
+  is retained and the call reports `DuplicateInstanceException`; if the
+  callback also throws, its original error takes precedence. If the callback
+  closes the scope, no replacement is installed and the call throws
+  `StateError`, unless the callback also throws.
+
 ## 0.3.0
 
 ### Breaking Changes

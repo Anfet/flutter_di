@@ -26,13 +26,10 @@ class InstanceNotFoundException extends DependencyException {
   final DiScope scope;
 
   /// Creates an exception for missing [requestedType] lookup in [scope].
-  InstanceNotFoundException(
-    this.requestedType,
-    this.scope, {
-    this.tag,
-  }) : super(
-          "'$requestedType' with tag '${tag ?? ''}' not found in '${scope.name}' scope",
-        );
+  InstanceNotFoundException(this.requestedType, this.scope, {this.tag})
+    : super(
+        "'$requestedType' with tag '${tag ?? ''}' not found in '${scope.name}' scope",
+      );
 }
 
 /// Thrown when a named scope cannot be found.
@@ -54,7 +51,7 @@ class DuplicateScopeException extends DependencyException {
 
   /// Creates an exception for duplicate scope [name] in [scope] tree.
   DuplicateScopeException(this.name, this.scope)
-      : super("scope '$name' is already present in '${scope.name}' scope tree");
+    : super("scope '$name' is already present in '${scope.name}' scope tree");
 }
 
 /// Thrown when registering an instance that conflicts with an existing one.
@@ -78,8 +75,8 @@ class DuplicateInstanceException extends DependencyException {
     required this.instanceType,
     this.tag,
   }) : super(
-          "$registeredType (instance: $instanceType, tag: '${tag ?? ''}') is already present in '${scope.name}' scope; use replace<T>() to override it",
-        );
+         "$registeredType (instance: $instanceType, tag: '${tag ?? ''}') is already present in '${scope.name}' scope; use replace<T>() to override it",
+       );
 }
 
 /// Thrown when lookup in child scopes matches more than one registration.
@@ -103,6 +100,6 @@ class MultipleInstancesFoundException extends DependencyException {
     required this.matches,
     this.tag,
   }) : super(
-          "multiple '$requestedType' instances with tag '${tag ?? ''}' found in child scopes of '${scope.name}': ${matches.map((s) => s.name).join(', ')}",
-        );
+         "multiple '$requestedType' instances with tag '${tag ?? ''}' found in child scopes of '${scope.name}': ${matches.map((s) => s.name).join(', ')}",
+       );
 }

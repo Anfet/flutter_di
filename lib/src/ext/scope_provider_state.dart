@@ -27,6 +27,11 @@ import 'package:simple_service_locator/simple_service_locator.dart';
 /// holding the name until [dispose] would make an ordinary element
 /// replacement throw [DuplicateScopeException].
 ///
+/// If a scope dependency throws from `onDispose` during [deactivate], the
+/// scope is still closed and Flutter's synchronous deactivate/activate work
+/// completes. The error is reported after the frame with its original stack
+/// trace.
+///
 /// Because a deactivated state's scope is closed and rebuilt, anything
 /// registered in [injectDependencies] is recreated when the state is
 /// reinserted through a [GlobalKey] move. Dependencies that must survive such
@@ -84,8 +89,15 @@ mixin ScopeProviderState<T extends StatefulWidget> on State<T> {
   @override
   void deactivate() {
     // Release the name before any replacing state runs initState().
-    _closeScope();
-    super.deactivate();
+    try {
+      _closeScope();
+    } catch (error, stackTrace) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => Error.throwWithStackTrace(error, stackTrace),
+      );
+    } finally {
+      super.deactivate();
+    }
   }
 
   @override

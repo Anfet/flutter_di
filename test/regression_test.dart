@@ -76,6 +76,260 @@ void main() {
       expect(scope.find<Contract>(), same(replacement));
       scope.close();
     });
+
+    test('replace installs the new instance after disposal fails', () {
+      final scope = DiScope.open('replace_dispose_failure');
+      final original = ImplA();
+      final replacement = ImplB();
+      final disposalError = StateError('dispose failed');
+      StackTrace? disposalStackTrace;
+      var notifications = 0;
+      scope.put<Contract>(
+        original,
+        onDispose: (_) {
+          try {
+            throw disposalError;
+          } catch (error, stackTrace) {
+            disposalStackTrace = stackTrace;
+            Error.throwWithStackTrace(error, stackTrace);
+          }
+        },
+      );
+      scope.addListener(() => notifications++);
+
+      try {
+        scope.replace<Contract>(replacement);
+        fail('Expected the disposal error');
+      } catch (error, stackTrace) {
+        expect(error, same(disposalError));
+        expect(stackTrace, same(disposalStackTrace));
+      }
+
+      expect(scope.find<Contract>(), same(replacement));
+      expect(scope.contains<ImplA>(), isFalse);
+      expect(scope.find<ImplB>(), same(replacement));
+      expect(notifications, 1);
+      scope.close();
+    });
+
+    test('replaceLazy keeps a lazy replacement after disposal fails', () {
+      final scope = DiScope.open('replace_lazy_dispose_failure');
+      final original = ImplA();
+      final replacement = ImplB();
+      final disposalError = StateError('dispose failed');
+      StackTrace? disposalStackTrace;
+      var replacementFactoryCalls = 0;
+      var notifications = 0;
+      scope.putLazy<Contract>(
+        () => original,
+        onDispose: (_) {
+          try {
+            throw disposalError;
+          } catch (error, stackTrace) {
+            disposalStackTrace = stackTrace;
+            Error.throwWithStackTrace(error, stackTrace);
+          }
+        },
+      );
+      expect(scope.find<Contract>(), same(original));
+      scope.addListener(() => notifications++);
+
+      try {
+        scope.replaceLazy<Contract>(() {
+          replacementFactoryCalls++;
+          return replacement;
+        });
+        fail('Expected the disposal error');
+      } catch (error, stackTrace) {
+        expect(error, same(disposalError));
+        expect(stackTrace, same(disposalStackTrace));
+      }
+
+      expect(replacementFactoryCalls, 0);
+      expect(scope.contains<Contract>(), isTrue);
+      expect(scope.find<Contract>(), same(replacement));
+      expect(replacementFactoryCalls, 1);
+      expect(notifications, 1);
+      scope.close();
+    });
+
+    test('replaceLazyAs keeps both lazy keys after disposal fails', () {
+      final scope = DiScope.open('replace_lazy_as_dispose_failure');
+      final original = ImplA();
+      final replacement = ImplB();
+      final disposalError = StateError('dispose failed');
+      StackTrace? disposalStackTrace;
+      var replacementFactoryCalls = 0;
+      var notifications = 0;
+      scope.putLazyAs<Contract, ImplA>(
+        () => original,
+        onDispose: (_) {
+          try {
+            throw disposalError;
+          } catch (error, stackTrace) {
+            disposalStackTrace = stackTrace;
+            Error.throwWithStackTrace(error, stackTrace);
+          }
+        },
+      );
+      expect(scope.find<ImplA>(), same(original));
+      scope.addListener(() => notifications++);
+
+      try {
+        scope.replaceLazyAs<Contract, ImplB>(() {
+          replacementFactoryCalls++;
+          return replacement;
+        });
+        fail('Expected the disposal error');
+      } catch (error, stackTrace) {
+        expect(error, same(disposalError));
+        expect(stackTrace, same(disposalStackTrace));
+      }
+
+      expect(replacementFactoryCalls, 0);
+      expect(scope.contains<Contract>(), isTrue);
+      expect(scope.contains<ImplA>(), isFalse);
+      expect(scope.contains<ImplB>(), isTrue);
+      expect(scope.find<Contract>(), same(replacement));
+      expect(scope.find<ImplB>(), same(replacement));
+      expect(replacementFactoryCalls, 1);
+      expect(notifications, 1);
+      scope.close();
+    });
+
+    test('replace preserves a registration made by its disposal callback', () {
+      final scope = DiScope.open('replace_reentrant_registration');
+      final callbackRegistration = ImplA();
+      scope.put<Contract>(
+        ImplA(),
+        onDispose: (_) => scope.put<Contract>(callbackRegistration),
+      );
+
+      expect(
+        () => scope.replace<Contract>(ImplB()),
+        throwsA(isA<DuplicateInstanceException>()),
+      );
+      expect(scope.find<Contract>(), same(callbackRegistration));
+      scope.close();
+    });
+
+    test(
+      'replace preserves a callback registration when disposal also fails',
+      () {
+        final scope = DiScope.open('replace_reentrant_registration_failure');
+        final callbackRegistration = ImplA();
+        final disposalError = StateError('dispose failed');
+        StackTrace? disposalStackTrace;
+        scope.put<Contract>(
+          ImplA(),
+          onDispose: (_) {
+            scope.put<Contract>(callbackRegistration);
+            try {
+              throw disposalError;
+            } catch (error, stackTrace) {
+              disposalStackTrace = stackTrace;
+              Error.throwWithStackTrace(error, stackTrace);
+            }
+          },
+        );
+
+        try {
+          scope.replace<Contract>(ImplB());
+          fail('Expected the disposal error');
+        } catch (error, stackTrace) {
+          expect(error, same(disposalError));
+          expect(stackTrace, same(disposalStackTrace));
+        }
+
+        expect(scope.find<Contract>(), same(callbackRegistration));
+        scope.close();
+      },
+    );
+
+    test('replace does not reopen a scope closed by its disposal callback', () {
+      final scope = DiScope.open('replace_reentrant_close');
+      scope.put<Contract>(ImplA(), onDispose: (_) => scope.close());
+
+      expect(() => scope.replace<Contract>(ImplB()), throwsStateError);
+      expect(() => scope.find<Contract>(), throwsStateError);
+    });
+
+    test('replaceLazy preserves a lazy registration made by its disposer', () {
+      final scope = DiScope.open('replace_lazy_reentrant_registration');
+      final callbackRegistration = ImplA();
+      scope.putLazy<Contract>(
+        ImplA.new,
+        onDispose: (_) => scope.putLazy<Contract>(() => callbackRegistration),
+      );
+      expect(scope.find<Contract>(), isA<ImplA>());
+
+      expect(
+        () => scope.replaceLazy<Contract>(ImplB.new),
+        throwsA(isA<DuplicateInstanceException>()),
+      );
+      expect(scope.find<Contract>(), same(callbackRegistration));
+      scope.close();
+    });
+
+    test('replaceLazy does not write into a scope closed by its disposer', () {
+      final scope = DiScope.open('replace_lazy_reentrant_close');
+      var replacementFactoryCalls = 0;
+      scope.putLazy<Contract>(ImplA.new, onDispose: (_) => scope.close());
+      expect(scope.find<Contract>(), isA<ImplA>());
+
+      expect(
+        () => scope.replaceLazy<Contract>(() {
+          replacementFactoryCalls++;
+          return ImplB();
+        }),
+        throwsStateError,
+      );
+      expect(replacementFactoryCalls, 0);
+      expect(() => scope.find<Contract>(), throwsStateError);
+    });
+
+    test('replaceLazyAs preserves both keys registered by its disposer', () {
+      final scope = DiScope.open('replace_lazy_as_reentrant_registration');
+      final callbackRegistration = ImplA();
+      scope.putLazyAs<Contract, ImplA>(
+        ImplA.new,
+        onDispose: (_) =>
+            scope.putLazyAs<Contract, ImplA>(() => callbackRegistration),
+      );
+      expect(scope.find<Contract>(), isA<ImplA>());
+
+      expect(
+        () => scope.replaceLazyAs<Contract, ImplB>(ImplB.new),
+        throwsA(isA<DuplicateInstanceException>()),
+      );
+      expect(scope.find<Contract>(), same(callbackRegistration));
+      expect(scope.find<ImplA>(), same(callbackRegistration));
+      expect(scope.contains<ImplB>(), isFalse);
+      scope.close();
+    });
+
+    test(
+      'replaceLazyAs does not write into a scope closed by its disposer',
+      () {
+        final scope = DiScope.open('replace_lazy_as_reentrant_close');
+        var replacementFactoryCalls = 0;
+        scope.putLazyAs<Contract, ImplA>(
+          ImplA.new,
+          onDispose: (_) => scope.close(),
+        );
+        expect(scope.find<Contract>(), isA<ImplA>());
+
+        expect(
+          () => scope.replaceLazyAs<Contract, ImplB>(() {
+            replacementFactoryCalls++;
+            return ImplB();
+          }),
+          throwsStateError,
+        );
+        expect(replacementFactoryCalls, 0);
+        expect(() => scope.find<Contract>(), throwsStateError);
+      },
+    );
   });
 
   group('find does not mask factory errors', () {
@@ -129,6 +383,124 @@ void main() {
         expect(error.tag, 'nope');
       }
 
+      root.close();
+    });
+  });
+
+  group('ambiguous descendant lookup does not materialize lazy values', () {
+    test('findInChildren materializes a unique lazy match once', () {
+      final root = DiScope.open('lazy_unique_children');
+      final child = DiScope.open('lazy_unique_child', knownParentScope: root);
+      var factoryCalls = 0;
+      child.putLazy<Contract>(() {
+        factoryCalls++;
+        return ImplA();
+      });
+
+      expect(root.findInChildren<Contract>(), isA<ImplA>());
+      expect(factoryCalls, 1);
+      expect(root.findInChildren<Contract>(), isA<ImplA>());
+      expect(factoryCalls, 1);
+      root.close();
+    });
+
+    test(
+      'find with descendant search materializes a unique lazy match once',
+      () {
+        final root = DiScope.open('lazy_unique_search');
+        final child = DiScope.open(
+          'lazy_unique_search_child',
+          knownParentScope: root,
+        );
+        var factoryCalls = 0;
+        child.putLazy<Contract>(() {
+          factoryCalls++;
+          return ImplA();
+        });
+
+        expect(root.find<Contract>(searchDescendants: true), isA<ImplA>());
+        expect(factoryCalls, 1);
+        expect(root.find<Contract>(searchDescendants: true), isA<ImplA>());
+        expect(factoryCalls, 1);
+        root.close();
+      },
+    );
+
+    test('findInChildren detects ambiguity before invoking factories', () {
+      final root = DiScope.open('lazy_ambiguous_children');
+      final childA = DiScope.open('lazy_ambiguous_a', knownParentScope: root);
+      final childB = DiScope.open('lazy_ambiguous_b', knownParentScope: root);
+      var factoryCalls = 0;
+      childA.putLazy<Contract>(() {
+        factoryCalls++;
+        return ImplA();
+      });
+      childB.putLazy<Contract>(() {
+        factoryCalls++;
+        return ImplB();
+      });
+
+      expect(
+        () => root.findInChildren<Contract>(),
+        throwsA(isA<MultipleInstancesFoundException>()),
+      );
+      expect(factoryCalls, 0);
+      root.close();
+    });
+
+    test('find with descendant search detects ambiguity before factories', () {
+      final root = DiScope.open('lazy_ambiguous_find');
+      final childA = DiScope.open(
+        'lazy_ambiguous_find_a',
+        knownParentScope: root,
+      );
+      final childB = DiScope.open(
+        'lazy_ambiguous_find_b',
+        knownParentScope: root,
+      );
+      var factoryCalls = 0;
+      childA.putLazy<Contract>(() {
+        factoryCalls++;
+        throw StateError('factory should not run');
+      });
+      childB.putLazy<Contract>(() {
+        factoryCalls++;
+        return ImplB();
+      });
+
+      expect(
+        () => root.find<Contract>(searchDescendants: true),
+        throwsA(isA<MultipleInstancesFoundException>()),
+      );
+      expect(factoryCalls, 0);
+      root.close();
+    });
+
+    test('onMany eagerly resolves all ambiguous values in tree order', () {
+      final root = DiScope.open('lazy_on_many');
+      final childA = DiScope.open('lazy_on_many_a', knownParentScope: root);
+      final childB = DiScope.open('lazy_on_many_b', knownParentScope: root);
+      final factoryOrder = <String>[];
+      childA.putLazy<Contract>(() {
+        factoryOrder.add('a');
+        return ImplA();
+      });
+      childB.putLazy<Contract>(() {
+        factoryOrder.add('b');
+        return ImplB();
+      });
+      List<Contract>? received;
+
+      final result = root.findInChildren<Contract>(
+        onMany: (values) {
+          received = values.toList();
+          return values.first;
+        },
+      );
+
+      expect(result, isA<ImplA>());
+      expect(factoryOrder, ['a', 'b']);
+      expect(received, hasLength(2));
       root.close();
     });
   });
@@ -239,8 +611,10 @@ void main() {
       final app = DiScope.open('lookup_known_app');
       app.put<int>(99);
 
-      final feature = DiScope.open('lookup_known_feature',
-          lookupParentScope: 'lookup_known_app');
+      final feature = DiScope.open(
+        'lookup_known_feature',
+        lookupParentScope: 'lookup_known_app',
+      );
 
       expect(feature.find<int>(), 99);
       app.close();
@@ -316,14 +690,103 @@ void main() {
   });
 
   group('listener reentrancy', () {
+    test('a prior listener receives a later nested mutation', () async {
+      final scope = DiScope.open('reentrant_deferred_notification');
+      final observed = <bool>[];
+      var registered = false;
+      scope.addListener(() => observed.add(scope.contains<int>()));
+      scope.addListener(() {
+        if (!registered) {
+          registered = true;
+          scope.put<int>(1);
+        }
+      });
+
+      scope.put<Contract>(ImplA());
+
+      expect(observed, [false]);
+      await Future<void>.delayed(Duration.zero);
+      expect(observed, [false, true]);
+      scope.close();
+    });
+
+    test('closing a scope cancels its pending notification', () async {
+      final scope = DiScope.open('reentrant_closed_notification');
+      final observed = <bool>[];
+      var registered = false;
+      scope.addListener(() => observed.add(scope.contains<int>()));
+      scope.addListener(() {
+        if (!registered) {
+          registered = true;
+          scope.put<int>(1);
+        }
+      });
+
+      scope.put<Contract>(ImplA());
+      scope.close();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(observed, [false]);
+    });
+
+    test(
+      'coalesces sequential nested mutations into one notification',
+      () async {
+        final scope = DiScope.open('reentrant_coalesced_notifications');
+        final observed = <String>[];
+        var registered = false;
+        scope.addListener(
+          () => observed.add(
+            '${scope.contains<int>()}:${scope.contains<String>()}',
+          ),
+        );
+        scope.addListener(() {
+          if (!registered) {
+            registered = true;
+            scope.put<int>(1);
+            scope.put<String>('value');
+          }
+        });
+
+        scope.put<Contract>(ImplA());
+
+        expect(observed, ['false:false']);
+        await Future<void>.delayed(Duration.zero);
+        expect(observed, ['false:false', 'true:true']);
+        scope.close();
+      },
+    );
+
+    test(
+      'a mutation during the pending notification does not recurse',
+      () async {
+        final scope = DiScope.open('reentrant_bounded_notifications');
+        var notifications = 0;
+        scope.addListener(() {
+          notifications++;
+          if (notifications == 1) {
+            scope.put<int>(1);
+          } else {
+            scope.put<String>('value');
+          }
+        });
+
+        scope.put<Contract>(ImplA());
+
+        await Future<void>.delayed(Duration.zero);
+        expect(notifications, 2);
+        expect(scope.contains<String>(), isTrue);
+        await Future<void>.delayed(Duration.zero);
+        expect(notifications, 2);
+        scope.close();
+      },
+    );
+
     test('a listener may open a scope during an open notification', () {
       final root = DiScope.open('reentrant_open');
       DiScope? opened;
       root.addListener(() {
-        opened ??= DiScope.open(
-          'reentrant_open_extra',
-          knownParentScope: root,
-        );
+        opened ??= DiScope.open('reentrant_open_extra', knownParentScope: root);
       });
 
       DiScope.open('reentrant_open_child', knownParentScope: root);
@@ -365,8 +828,9 @@ void main() {
   });
 
   group('ScopeProviderState lifecycle', () {
-    testWidgets('replacing a widget by key does not collide on scope name',
-        (tester) async {
+    testWidgets('replacing a widget by key does not collide on scope name', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         _wrap(const _ScopedWidget(key: ValueKey('first'))),
       );
@@ -383,8 +847,9 @@ void main() {
       expect(RootScope.locateScope('lifecycle_scope'), isNull);
     });
 
-    testWidgets('scope name stays stable when widget configuration changes',
-        (tester) async {
+    testWidgets('scope name stays stable when widget configuration changes', (
+      tester,
+    ) async {
       final key = GlobalKey<_ConfigurableState>();
       await tester.pumpWidget(_wrap(_ConfigurableWidget(id: '1', key: key)));
       final opened = key.currentState!.scope;
@@ -401,9 +866,7 @@ void main() {
 
     testWidgets('a GlobalKey move reopens the scope', (tester) async {
       final key = GlobalKey<_ScopedState>();
-      await tester.pumpWidget(
-        _wrap(Row(children: [_ScopedWidget(key: key)])),
-      );
+      await tester.pumpWidget(_wrap(Row(children: [_ScopedWidget(key: key)])));
       expect(key.currentState!.scope.find<int>(), 42);
 
       await tester.pumpWidget(
@@ -418,8 +881,9 @@ void main() {
       expect(RootScope.locateScope('lifecycle_scope'), isNull);
     });
 
-    testWidgets('scope is closed once the state leaves the tree',
-        (tester) async {
+    testWidgets('scope is closed once the state leaves the tree', (
+      tester,
+    ) async {
       final key = GlobalKey<_ScopedState>();
       await tester.pumpWidget(_wrap(_ScopedWidget(key: key)));
       final scope = key.currentState!.scope;
@@ -428,16 +892,61 @@ void main() {
 
       expect(() => scope.find<int>(), throwsA(isA<StateError>()));
     });
+
+    testWidgets('a disposal error during a GlobalKey move still reactivates', (
+      tester,
+    ) async {
+      final key = GlobalKey<_ScopedState>();
+      await tester.pumpWidget(
+        _wrap(Row(children: [_ScopedWidget(key: key, throwOnDispose: true)])),
+      );
+      final oldScope = key.currentState!.scope;
+
+      await tester.pumpWidget(
+        _wrap(
+          Column(children: [_ScopedWidget(key: key, throwOnDispose: true)]),
+        ),
+      );
+
+      expect(tester.takeException(), isA<StateError>());
+      expect(key.currentState, isNotNull);
+      expect(key.currentState!.scope, isNot(same(oldScope)));
+      expect(key.currentState!.scope.find<int>(), 42);
+      expect(
+        RootScope.locateScope('lifecycle_scope'),
+        same(key.currentState!.scope),
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      expect(RootScope.locateScope('lifecycle_scope'), isNull);
+    });
+
+    testWidgets('a disposal error during removal still disposes the state', (
+      tester,
+    ) async {
+      final key = GlobalKey<_ScopedState>();
+      await tester.pumpWidget(
+        _wrap(_ScopedWidget(key: key, throwOnDispose: true)),
+      );
+      final scope = key.currentState!.scope;
+
+      await tester.pumpWidget(const SizedBox.shrink());
+
+      expect(tester.takeException(), isA<StateError>());
+      expect(key.currentState, isNull);
+      expect(RootScope.locateScope('lifecycle_scope'), isNull);
+      expect(() => scope.find<int>(), throwsA(isA<StateError>()));
+    });
   });
 }
 
-Widget _wrap(Widget child) => Directionality(
-      textDirection: TextDirection.ltr,
-      child: child,
-    );
+Widget _wrap(Widget child) =>
+    Directionality(textDirection: TextDirection.ltr, child: child);
 
 class _ScopedWidget extends StatefulWidget {
-  const _ScopedWidget({super.key});
+  const _ScopedWidget({this.throwOnDispose = false, super.key});
+
+  final bool throwOnDispose;
 
   @override
   State<_ScopedWidget> createState() => _ScopedState();
@@ -445,13 +954,25 @@ class _ScopedWidget extends StatefulWidget {
 
 class _ScopedState extends State<_ScopedWidget>
     with ScopeProviderState<_ScopedWidget> {
+  bool _hasThrownDisposal = false;
+
   @override
   String get scopeName => 'lifecycle_scope';
 
   @override
   void injectDependencies() {
     super.injectDependencies();
-    scope.put<int>(42);
+    scope.put<int>(
+      42,
+      onDispose: widget.throwOnDispose
+          ? (_) {
+              if (!_hasThrownDisposal) {
+                _hasThrownDisposal = true;
+                throw StateError('dispose failed');
+              }
+            }
+          : null,
+    );
   }
 
   @override

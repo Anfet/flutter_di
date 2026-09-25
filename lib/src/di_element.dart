@@ -54,21 +54,15 @@ class DiElement<T> {
   }
 
   /// Creates an element holding an already constructed [item].
-  DiElement.direct({
-    required T item,
-    this.tag,
-    this.onDispose,
-  })  : _instance = item,
-        _isMaterialized = true,
-        instancer = null;
+  DiElement.direct({required T item, this.tag, this.onDispose})
+    : _instance = item,
+      _isMaterialized = true,
+      instancer = null;
 
   /// Creates an element backed by a lazy [instancer] callback.
-  DiElement.lazy({
-    required this.instancer,
-    this.tag,
-    this.onDispose,
-  })  : _instance = null,
-        _isMaterialized = false;
+  DiElement.lazy({required this.instancer, this.tag, this.onDispose})
+    : _instance = null,
+      _isMaterialized = false;
 
   /// Disposes the current materialized instance if present.
   ///

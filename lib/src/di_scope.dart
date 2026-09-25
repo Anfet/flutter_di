@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
@@ -33,10 +34,10 @@ class DiScope extends ChangeNotifier {
   final List<DiScope> _subScopes = [];
   bool _isClosed = false;
   bool _isNotifying = false;
+  bool _hasPendingNotification = false;
+  bool _isDispatchingPendingNotification = false;
 
-  DiScope._root()
-      : name = _kRootScope,
-        _parent = null;
+  DiScope._root() : name = _kRootScope, _parent = null;
 
   /// Opens a new scope and attaches it to a parent scope.
   ///
@@ -61,32 +62,37 @@ class DiScope extends ChangeNotifier {
     if (name.isEmpty) {
       throw ArgumentError.value(name, 'name', 'scope name must not be empty');
     }
-    _parent = knownParentScope ??
+    final parent =
+        knownParentScope ??
         _resolveParentByName(lookupParentScope) ??
         RootScope;
-    _parent!._assertOpen();
+    _parent = parent;
+    parent._assertOpen();
     final root = RootScope;
     if (root.locateScope(name) != null) {
       throw DuplicateScopeException(name, root);
     }
-    _parent?._subScopes.add(this);
+    parent._subScopes.add(this);
     // Notified after the scope is fully attached. Notifying earlier would let
     // a listener re-enter DiScope.open() while this constructor is still
     // running and observe a half-built tree.
-    _parent?.notifyListeners();
+    parent.notifyListeners();
   }
 
   /// Notifies listeners of a scope or registration change.
   ///
-  /// Reentrant calls are suppressed: [ChangeNotifier] dispatches listeners
-  /// synchronously, so a listener that itself mutates the scope (opens a child
-  /// scope, registers a dependency) would otherwise re-enter the same listener
-  /// before its first invocation returned, and observe partially applied
-  /// state. The mutation still happens; only the nested notification is
-  /// dropped, because the outer dispatch already reports the final state.
+  /// Mutations made by listeners are applied, and their notifications are
+  /// coalesced into one later event-loop turn instead of recursively invoking
+  /// listeners during the active dispatch. Mutations made during that pending
+  /// notification are also applied but do not schedule a third notification,
+  /// which bounds one synchronous dispatch to two listener invocations.
+  /// Closing the scope before the pending notification runs cancels it.
   @override
   void notifyListeners() {
     if (_isNotifying) {
+      if (!_isDispatchingPendingNotification) {
+        _schedulePendingNotification();
+      }
       return;
     }
 
@@ -96,6 +102,25 @@ class DiScope extends ChangeNotifier {
     } finally {
       _isNotifying = false;
     }
+  }
+
+  void _schedulePendingNotification() {
+    if (_hasPendingNotification) {
+      return;
+    }
+
+    _hasPendingNotification = true;
+    Future<void>(() {
+      _hasPendingNotification = false;
+      if (!_isClosed) {
+        _isDispatchingPendingNotification = true;
+        try {
+          notifyListeners();
+        } finally {
+          _isDispatchingPendingNotification = false;
+        }
+      }
+    });
   }
 
   /// Resolves a parent scope from an explicit [name].
@@ -221,12 +246,7 @@ class DiScope extends ChangeNotifier {
     String? tag,
     bool searchDescendants = false,
     T Function(Iterable<T> children)? onMany,
-  }) =>
-      find<T>(
-        tag: tag,
-        searchDescendants: searchDescendants,
-        onMany: onMany,
-      );
+  }) => find<T>(tag: tag, searchDescendants: searchDescendants, onMany: onMany);
 
   /// Resolves an instance of `T`.
   ///
@@ -243,6 +263,12 @@ class DiScope extends ChangeNotifier {
   /// so it is meaningful only together with [searchDescendants]. Passing it
   /// alone is an assertion error in debug builds rather than a silently
   /// ignored argument.
+  ///
+  /// When multiple descendants match and [onMany] is omitted, ambiguity is
+  /// reported before any lazy value is created. When multiple descendants
+  /// match and [onMany] is provided, all matching values are materialized in
+  /// breadth-first tree order before the callback is invoked. A single match is
+  /// returned directly without invoking [onMany].
   ///
   /// Throws [InstanceNotFoundException] when resolution fails.
   T find<T extends Object>({
@@ -294,6 +320,12 @@ class DiScope extends ChangeNotifier {
   /// Throws:
   /// - [InstanceNotFoundException] when no descendants match.
   /// - [MultipleInstancesFoundException] when more than one descendant matches.
+  ///
+  /// Ambiguity is detected before lazy values are created unless [onMany] is
+  /// provided. When multiple descendants match and [onMany] is provided, all
+  /// matching values are materialized in breadth-first tree order before the
+  /// callback is invoked. A single match is returned directly without invoking
+  /// [onMany].
   T findInChildren<T extends Object>({
     String? tag,
     T Function(Iterable<T> children)? onMany,
@@ -315,7 +347,7 @@ class DiScope extends ChangeNotifier {
     String? tag,
     T Function(Iterable<T> children)? onMany,
   }) {
-    final matches = <_ScopedMatch<T>>[];
+    final matches = <_ScopedMatch>[];
     final visited = <DiScope>{this};
     final queue = Queue<DiScope>.of(_subScopes);
     while (queue.isNotEmpty) {
@@ -324,9 +356,9 @@ class DiScope extends ChangeNotifier {
         continue;
       }
 
-      final local = scope._lookupLocal<T>(tag: tag);
-      if (local.found) {
-        matches.add(_ScopedMatch(scope: scope, value: local.value as T));
+      final local = scope._elementOf<T>(tag);
+      if (local != null) {
+        matches.add(_ScopedMatch(scope: scope, element: local));
       }
       queue.addAll(scope._subScopes);
     }
@@ -335,18 +367,22 @@ class DiScope extends ChangeNotifier {
       return const _Lookup.miss();
     }
     if (matches.length > 1) {
-      if (onMany != null) {
-        return _Lookup.hit(onMany(matches.map((m) => m.value)));
+      if (onMany == null) {
+        throw MultipleInstancesFoundException(
+          T,
+          this,
+          tag: tag,
+          matches: matches.map((m) => m.scope).toList(growable: false),
+        );
       }
-      throw MultipleInstancesFoundException(
-        T,
-        this,
-        tag: tag,
-        matches: matches.map((m) => m.scope).toList(growable: false),
-      );
+
+      final values = matches
+          .map((match) => match.element.instance as T)
+          .toList(growable: false);
+      return _Lookup.hit(onMany(values));
     }
 
-    return _Lookup.hit(matches.first.value);
+    return _Lookup.hit(matches.single.element.instance as T);
   }
 
   /// Finds descendant scopes containing an explicit registration for `T` and
@@ -474,8 +510,19 @@ class DiScope extends ChangeNotifier {
   /// [DuplicateInstanceException] and the previous registration for `T` is
   /// left intact and undisposed.
   ///
-  /// Otherwise the existing local value is evicted first (and disposed through
-  /// its callback), then [instance] is registered via [put].
+  /// After target-key validation succeeds, the existing local value is evicted
+  /// and disposed. If disposal throws and the replacement keys remain free,
+  /// [instance] is registered and the disposal error is rethrown with its
+  /// original stack trace.
+  ///
+  /// If the disposal callback registers a key needed by this replacement and
+  /// leaves the scope open, its registration is retained and this call throws
+  /// [DuplicateInstanceException]. If the callback also throws, that original
+  /// callback error takes precedence over the duplicate-key error.
+  ///
+  /// If the disposal callback closes this scope, the replacement is not
+  /// installed and this call throws [StateError]. If the callback also throws,
+  /// its error takes precedence.
   T replace<T extends Object>(
     T instance, {
     String? tag,
@@ -486,32 +533,43 @@ class DiScope extends ChangeNotifier {
     if (registerRuntimeType) {
       _assertReplacementKeyAvailable<T>(instance.runtimeType, tag: tag);
     }
-    if (contains<T>(tag: tag)) {
-      _remove<T>(tag: tag).dispose();
-    }
-
-    return _put<T>(
-      instance,
+    _replace<T>(
       tag: tag,
-      onDispose: onDispose,
-      registerRuntimeType: registerRuntimeType,
-      notify: true,
+      install: () => _put<T>(
+        instance,
+        tag: tag,
+        onDispose: onDispose,
+        registerRuntimeType: registerRuntimeType,
+        notify: false,
+      ),
     );
+    return instance;
   }
 
   /// Replaces an existing lazy registration for `T` in this scope.
   ///
-  /// If an instance exists for the same type/tag in this scope, it is evicted
-  /// first and disposed via its callback.
-  void replaceLazy<T extends Object>(ValueGetter<T> instancer,
-      {String? tag, DisposeCallback<T>? onDispose}) {
+  /// The existing registration is evicted and disposed first. If disposal
+  /// throws and the `T` key remains free, the lazy replacement is installed
+  /// and the original disposal error and stack trace are then rethrown.
+  ///
+  /// If the disposal callback registers `T` with the same [tag] and leaves the
+  /// scope open, its registration is retained and this call throws
+  /// [DuplicateInstanceException]. If disposal also throws, that original
+  /// callback error takes precedence.
+  ///
+  /// If the disposal callback closes this scope, the lazy replacement is not
+  /// installed and this call throws [StateError], unless the callback also
+  /// throws, in which case its error takes precedence.
+  void replaceLazy<T extends Object>(
+    ValueGetter<T> instancer, {
+    String? tag,
+    DisposeCallback<T>? onDispose,
+  }) {
     _assertOpen();
-    if (contains<T>(tag: tag)) {
-      _remove<T>(tag: tag).dispose();
-    }
-
-    _putLazy<T>(instancer, tag: tag, onDispose: onDispose);
-    notifyListeners();
+    _replace<T>(
+      tag: tag,
+      install: () => _putLazy<T>(instancer, tag: tag, onDispose: onDispose),
+    );
   }
 
   /// Replaces a lazy registration while keeping both declared and implementation
@@ -521,6 +579,18 @@ class DiScope extends ChangeNotifier {
   /// [TImplementation] is already held by an unrelated registration, the call
   /// throws [DuplicateInstanceException] and the previous registration for `T`
   /// is left intact and undisposed.
+  ///
+  /// After target-key validation succeeds, the existing registration is
+  /// disposed before installing the replacement. If disposal throws and both
+  /// keys remain free, the lazy replacement is installed and the original
+  /// disposal error and stack trace are rethrown. If the disposal callback
+  /// registers a key needed by the replacement and leaves the scope open, its
+  /// registration is retained and this call throws
+  /// [DuplicateInstanceException], unless disposal also throws, in which case
+  /// the original callback error takes precedence.
+  /// If the disposal callback closes this scope, the lazy replacement is not
+  /// installed and this call throws [StateError], unless the callback also
+  /// throws, in which case its error takes precedence.
   void replaceLazyAs<T extends Object, TImplementation extends T>(
     ValueGetter<TImplementation> instancer, {
     String? tag,
@@ -528,15 +598,52 @@ class DiScope extends ChangeNotifier {
   }) {
     _assertOpen();
     _assertReplacementKeyAvailable<T>(TImplementation, tag: tag);
-    if (contains<T>(tag: tag)) {
-      _remove<T>(tag: tag).dispose();
-    }
-    _putLazyAs<T, TImplementation>(
-      instancer,
+    _replace<T>(
       tag: tag,
-      onDispose: onDispose,
+      install: () => _putLazyAs<T, TImplementation>(
+        instancer,
+        tag: tag,
+        onDispose: onDispose,
+      ),
     );
-    notifyListeners();
+  }
+
+  /// Removes a local registration, disposes it, and attempts to install the
+  /// replacement. A disposal failure is rethrown after the installation
+  /// attempt with its original stack trace.
+  void _replace<T extends Object>({
+    String? tag,
+    required void Function() install,
+  }) {
+    final previous = _elementOf<T>(tag);
+    Object? disposalError;
+    StackTrace? disposalStackTrace;
+
+    if (previous != null) {
+      _remove<T>(tag: tag);
+      try {
+        previous.dispose();
+      } catch (error, stackTrace) {
+        disposalError = error;
+        disposalStackTrace = stackTrace;
+      }
+    }
+
+    try {
+      // A disposer may close this scope. Do not recreate registrations after
+      // teardown has completed.
+      _assertOpen();
+      install();
+      notifyListeners();
+    } catch (error, stackTrace) {
+      if (disposalError == null) {
+        Error.throwWithStackTrace(error, stackTrace);
+      }
+    }
+
+    if (disposalError != null && disposalStackTrace != null) {
+      Error.throwWithStackTrace(disposalError, disposalStackTrace);
+    }
   }
 
   /// Registers `T` lazily in the current scope.
@@ -545,17 +652,15 @@ class DiScope extends ChangeNotifier {
   ///
   /// Throws [DuplicateInstanceException] when a same type/tag registration
   /// already exists in this scope.
-  void putLazy<T extends Object>(ValueGetter<T> instancer,
-      {String? tag, DisposeCallback<T>? onDispose}) {
+  void putLazy<T extends Object>(
+    ValueGetter<T> instancer, {
+    String? tag,
+    DisposeCallback<T>? onDispose,
+  }) {
     _assertOpen();
     var item = _elementOf<T>(tag);
     if (item != null) {
-      throw DuplicateInstanceException(
-        T,
-        this,
-        instanceType: T,
-        tag: tag,
-      );
+      throw DuplicateInstanceException(T, this, instanceType: T, tag: tag);
     }
 
     _putLazy<T>(instancer, tag: tag, onDispose: onDispose);
@@ -582,11 +687,7 @@ class DiScope extends ChangeNotifier {
       );
     }
     _assertLazyImplementationKeyAvailable<T, TImplementation>(tag: tag);
-    _putLazyAs<T, TImplementation>(
-      instancer,
-      tag: tag,
-      onDispose: onDispose,
-    );
+    _putLazyAs<T, TImplementation>(instancer, tag: tag, onDispose: onDispose);
     notifyListeners();
   }
 
@@ -603,14 +704,13 @@ class DiScope extends ChangeNotifier {
     String? tag,
     DisposeCallback<T>? onDispose,
     bool registerRuntimeType = true,
-  }) =>
-      _put<T>(
-        instance,
-        tag: tag,
-        onDispose: onDispose,
-        registerRuntimeType: registerRuntimeType,
-        notify: true,
-      );
+  }) => _put<T>(
+    instance,
+    tag: tag,
+    onDispose: onDispose,
+    registerRuntimeType: registerRuntimeType,
+    notify: true,
+  );
 
   T _put<T extends Object>(
     T instance, {
@@ -666,6 +766,10 @@ class DiScope extends ChangeNotifier {
     String? tag,
     DisposeCallback<T>? onDispose,
   }) {
+    _assertOpen();
+    if (contains<T>(tag: tag)) {
+      throw DuplicateInstanceException(T, this, instanceType: T, tag: tag);
+    }
     final map = _instances.putIfAbsent(T, () => <String, DiElement<Object?>>{});
     map[tag ?? ''] = DiElement<Object?>.lazy(
       instancer: instancer,
@@ -674,10 +778,10 @@ class DiScope extends ChangeNotifier {
     );
   }
 
-  void _assertLazyImplementationKeyAvailable<T extends Object,
-      TImplementation extends T>({
-    String? tag,
-  }) {
+  void _assertLazyImplementationKeyAvailable<
+    T extends Object,
+    TImplementation extends T
+  >({String? tag}) {
     if (TImplementation != T && containsType(TImplementation, tag: tag)) {
       throw DuplicateInstanceException(
         TImplementation,
@@ -693,6 +797,16 @@ class DiScope extends ChangeNotifier {
     String? tag,
     DisposeCallback<TImplementation>? onDispose,
   }) {
+    _assertOpen();
+    if (contains<T>(tag: tag)) {
+      throw DuplicateInstanceException(
+        T,
+        this,
+        instanceType: TImplementation,
+        tag: tag,
+      );
+    }
+    _assertLazyImplementationKeyAvailable<T, TImplementation>(tag: tag);
     final item = DiElement<Object?>.lazy(
       instancer: instancer,
       tag: tag,
@@ -856,7 +970,8 @@ class DiScope extends ChangeNotifier {
               _parent?._isRegisteredType(type, tag: element.tag) ?? false;
           final value = element.isMaterialized ? '${element.peek}' : '<lazy>';
           debugPrint(
-              "$tabs<$type> $value; ${element.tag == null ? '' : '(${element.tag})'}${isReplaced ? ' overrides (${_parent?.name});' : ''}");
+            "$tabs<$type> $value; ${element.tag == null ? '' : '(${element.tag})'}${isReplaced ? ' overrides (${_parent?.name});' : ''}",
+          );
         }
       }
     }
@@ -876,14 +991,12 @@ class _Lookup {
 
   const _Lookup.hit(this.value) : found = true;
 
-  const _Lookup.miss()
-      : found = false,
-        value = null;
+  const _Lookup.miss() : found = false, value = null;
 }
 
-class _ScopedMatch<T> {
+class _ScopedMatch {
   final DiScope scope;
-  final T value;
+  final DiElement<Object?> element;
 
-  _ScopedMatch({required this.scope, required this.value});
+  _ScopedMatch({required this.scope, required this.element});
 }
