@@ -77,7 +77,9 @@ dependency, or close the scope itself. Nested notifications do not re-enter
 listeners; one follow-up notification is queued for the next asynchronous
 event-loop turn so listeners can observe the nested mutation. A mutation made
 during that follow-up is applied but does not queue a third notification; this
-bounds one synchronous dispatch to two listener invocations.
+bounds one synchronous dispatch to two listener invocations. When a listener
+closes its own scope, the remaining listeners still receive the notification in
+progress, and the scope finishes disposing once that notification completes.
 
 ```dart
 import 'package:simple_service_locator/simple_service_locator.dart';
@@ -126,7 +128,7 @@ available lazily. `putLazy<A>()` registers only `A`.
 
 ## Flutter Scope Lifecycle Helper
 
-`ScopeProviderState` is context-less: pass a [DiScope] explicitly through a
+`ScopeProviderState` is context-less: pass a `DiScope` explicitly through a
 constructor or use a known globally unique scope name when another object must
 access it. There is no widget consumer lookup helper.
 

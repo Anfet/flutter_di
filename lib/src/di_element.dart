@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 /// Called when an instance is removed from a scope or a scope is closed.
 typedef DisposeCallback<T> = void Function(T);
 
+/// A wrapper around a direct or lazily created scoped instance.
 class DiElement<T> {
   T? _instance;
 

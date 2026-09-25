@@ -36,6 +36,7 @@ class DiScope extends ChangeNotifier {
   bool _isNotifying = false;
   bool _hasPendingNotification = false;
   bool _isDispatchingPendingNotification = false;
+  bool _isDisposalDeferred = false;
 
   DiScope._root() : name = _kRootScope, _parent = null;
 
@@ -101,6 +102,10 @@ class DiScope extends ChangeNotifier {
       super.notifyListeners();
     } finally {
       _isNotifying = false;
+      if (_isDisposalDeferred) {
+        _isDisposalDeferred = false;
+        super.dispose();
+      }
     }
   }
 
@@ -840,7 +845,9 @@ class DiScope extends ChangeNotifier {
   /// Closes this scope, all descendants, and disposes owned instances.
   ///
   /// Safe to call multiple times. Safe to call from a listener of this scope
-  /// or of its parent.
+  /// or of its parent. When called from a listener of this scope, listeners
+  /// after it still receive the notification in progress, and the underlying
+  /// [ChangeNotifier] is disposed once that notification completes.
   void close() {
     if (identical(this, RootScope)) {
       throw ArgumentError('cannot close root scope');
@@ -855,10 +862,17 @@ class DiScope extends ChangeNotifier {
     failures.run(() => _parent?.notifyListeners());
     _disposeContents(failures);
     // No self-notification here: this scope is already closed, so a listener
-    // could not act on it, and `ChangeNotifier.dispose()` asserts when it runs
-    // inside a notification dispatch — which is exactly what happens when
-    // close() is called from this scope's own listener.
-    failures.run(super.dispose);
+    // could not act on it.
+    //
+    // `ChangeNotifier.dispose()` asserts when it runs inside this notifier's
+    // own dispatch, and in release it empties the listener list under the
+    // running loop. Closing from this scope's own listener therefore defers
+    // disposal until notifyListeners() unwinds.
+    if (_isNotifying) {
+      _isDisposalDeferred = true;
+    } else {
+      failures.run(super.dispose);
+    }
     failures.rethrowIfPresent();
   }
 
@@ -952,10 +966,10 @@ class DiScope extends ChangeNotifier {
   }) {
     // ignore: deprecated_member_use_from_same_package
     final shouldPrintInstances = verboseInstances ?? verboseInstaces;
-    var tabs = offset ?? '';
+    final tabs = offset ?? '';
     debugPrint("$tabs$name");
+    final nestedTabs = '$tabs\t';
     if (shouldPrintInstances) {
-      tabs += '\t';
       final printed = Set<DiElement<Object?>>.identity();
       for (final entry in _instances.entries) {
         for (final element in entry.value.values) {
@@ -970,14 +984,14 @@ class DiScope extends ChangeNotifier {
               _parent?._isRegisteredType(type, tag: element.tag) ?? false;
           final value = element.isMaterialized ? '${element.peek}' : '<lazy>';
           debugPrint(
-            "$tabs<$type> $value; ${element.tag == null ? '' : '(${element.tag})'}${isReplaced ? ' overrides (${_parent?.name});' : ''}",
+            "$nestedTabs<$type> $value; ${element.tag == null ? '' : '(${element.tag})'}${isReplaced ? ' overrides (${_parent?.name});' : ''}",
           );
         }
       }
     }
 
     for (var s in _subScopes) {
-      s.verboseTree(verboseInstances: shouldPrintInstances, offset: tabs);
+      s.verboseTree(verboseInstances: shouldPrintInstances, offset: nestedTabs);
     }
   }
 }

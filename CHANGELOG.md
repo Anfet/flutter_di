@@ -25,6 +25,12 @@
   callback also throws, its original error takes precedence. If the callback
   closes the scope, no replacement is installed and the call throws
   `StateError`, unless the callback also throws.
+- Closing a scope from its own listener no longer disposes the underlying
+  `ChangeNotifier` mid-dispatch. Disposal is deferred until the notification
+  completes, so debug builds no longer report a `dispose()` assertion and the
+  remaining listeners still receive the notification in progress.
+- `verboseTree(verboseInstances: false)` indents child scopes under their
+  parent instead of printing the whole tree at one level.
 
 ## 0.3.0
 

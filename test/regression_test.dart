@@ -535,6 +535,24 @@ void main() {
       expect(factoryCalls, 0);
       scope.close();
     });
+
+    test('verboseTree indents child scopes without instances', () {
+      final root = DiScope.open('diag_indent_root');
+      DiScope.open('diag_indent_child', knownParentScope: root);
+      final lines = <String>[];
+      final previousDebugPrint = debugPrint;
+      debugPrint = (String? message, {int? wrapWidth}) =>
+          lines.add(message ?? '');
+
+      try {
+        root.verboseTree(verboseInstances: false);
+      } finally {
+        debugPrint = previousDebugPrint;
+        root.close();
+      }
+
+      expect(lines, ['diag_indent_root', '\tdiag_indent_child']);
+    });
   });
 
   group('lazy factory failures', () {
@@ -824,6 +842,32 @@ void main() {
       expect(() => child.put<Contract>(ImplA()), returnsNormally);
       expect(RootScope.locateScope('reentrant_close_child'), isNull);
       root.close();
+    });
+
+    test('closing a scope from its own listener reports no errors', () {
+      final reported = <FlutterErrorDetails>[];
+      final previousOnError = FlutterError.onError;
+      FlutterError.onError = reported.add;
+      final root = DiScope.open('reentrant_close_clean_root');
+      final child = DiScope.open(
+        'reentrant_close_clean_child',
+        knownParentScope: root,
+      );
+      var laterListenerCalls = 0;
+      child.addListener(child.close);
+      child.addListener(() => laterListenerCalls++);
+
+      try {
+        child.put<Contract>(ImplA());
+      } finally {
+        FlutterError.onError = previousOnError;
+        root.close();
+      }
+
+      expect(reported, isEmpty);
+      expect(laterListenerCalls, 1);
+      // A disposed ChangeNotifier rejects new listeners in debug builds.
+      expect(() => child.addListener(() {}), throwsFlutterError);
     });
   });
 

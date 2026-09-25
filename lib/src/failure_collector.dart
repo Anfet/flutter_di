@@ -26,5 +26,3 @@ class FailureCollector {
     }
   }
 }
-
-/// A wrapper around a direct or lazily created scoped instance.

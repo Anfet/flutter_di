@@ -2,4 +2,5 @@ AGENTS.md
 COMPLETION.md
 todo.md
 build/
+doc/api/
 *.iml
